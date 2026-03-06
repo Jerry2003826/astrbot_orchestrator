@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from astrbot_orchestrator_v5.orchestrator.agent_registry import AgentRecord, AgentRegistry
 

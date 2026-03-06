@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from astrbot_orchestrator_v5.workflow.nodes import (
     NodeStatus,

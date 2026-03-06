@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from astrbot_orchestrator_v5.sandbox.shipyard_sandbox import ShipyardSandbox
-from astrbot_orchestrator_v5.sandbox.types import ExecChunk, ExecResult, SandboxFile
+from astrbot_orchestrator_v5.sandbox.types import ExecChunk, ExecResult
 
 if TYPE_CHECKING:
     from _pytest.capture import CaptureFixture
