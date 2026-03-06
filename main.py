@@ -168,10 +168,10 @@ class OrchestratorPlugin(Star):
 
         用法:
         - /plugin search <关键词>   搜索插件市场
-        - /plugin install <url>     安装插件（自动使用 GitHub 加速）
+        - /plugin install <url>     安装插件（管理员，自动使用 GitHub 加速）
         - /plugin list              列出已安装插件
-        - /plugin remove <名称>     卸载插件
-        - /plugin update <名称>     更新插件
+        - /plugin remove <名称>     卸载插件（管理员）
+        - /plugin update <名称>     更新插件（管理员）
         - /plugin proxy             查看 GitHub 加速设置
         """
         await self.initialize()
@@ -185,11 +185,11 @@ class OrchestratorPlugin(Star):
         Skill 管理
 
         用法:
-        - /skill list                列出所有 Skill
+        - /skill list                列出所有 Skill（管理员）
         - /skill create <名称>       创建新 Skill（交互式）
         - /skill edit <名称>         编辑 Skill
-        - /skill delete <名称>       删除 Skill
-        - /skill read <名称>         查看 Skill 内容
+        - /skill delete <名称>       删除 Skill（管理员）
+        - /skill read <名称>         查看 Skill 内容（管理员）
         """
         await self.initialize()
         handlers = self._get_command_handlers()
@@ -202,11 +202,11 @@ class OrchestratorPlugin(Star):
         MCP 配置管理
 
         用法:
-        - /mcp list                  列出所有 MCP 服务
-        - /mcp add <名称> <url>      添加 MCP 服务
-        - /mcp remove <名称>         移除 MCP 服务
-        - /mcp test <名称>           测试 MCP 连接
-        - /mcp tools <名称>          查看 MCP 工具
+        - /mcp list                  列出所有 MCP 服务（管理员）
+        - /mcp add <名称> <url>      添加 MCP 服务（管理员）
+        - /mcp remove <名称>         移除 MCP 服务（管理员）
+        - /mcp test <名称>           测试 MCP 连接（管理员）
+        - /mcp tools <名称>          查看 MCP 工具（管理员）
         """
         await self.initialize()
         handlers = self._get_command_handlers()
@@ -233,7 +233,7 @@ class OrchestratorPlugin(Star):
     @filter.command("debug")
     async def handle_debug(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
         """
-        自我诊断和 Debug
+        自我诊断和 Debug（管理员）
 
         用法:
         - /debug status        查看系统状态

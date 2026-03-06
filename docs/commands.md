@@ -49,10 +49,10 @@
 ### Plugin 子命令
 
 - `/plugin search <关键词>`
-- `/plugin install <url>`
+- `/plugin install <url>`（管理员）
 - `/plugin list`
-- `/plugin remove <名称>`
-- `/plugin update <名称>`
+- `/plugin remove <名称>`（管理员）
+- `/plugin update <名称>`（管理员）
 - `/plugin proxy`
 
 ### Plugin 示例
@@ -69,11 +69,11 @@
 
 ### Skill 子命令
 
-- `/skill list`
+- `/skill list`（管理员）
 - `/skill create <名称>`
 - `/skill edit <名称>`
-- `/skill delete <名称>`
-- `/skill read <名称>`
+- `/skill delete <名称>`（管理员）
+- `/skill read <名称>`（管理员）
 
 ### Skill 示例
 
@@ -89,11 +89,11 @@
 
 ### MCP 子命令
 
-- `/mcp list`
-- `/mcp add <名称> <url>`
-- `/mcp remove <名称>`
-- `/mcp test <名称>`
-- `/mcp tools <名称>`
+- `/mcp list`（管理员）
+- `/mcp add <名称> <url>`（管理员）
+- `/mcp remove <名称>`（管理员）
+- `/mcp test <名称>`（管理员）
+- `/mcp tools <名称>`（管理员）
 
 ### MCP 示例
 
@@ -109,11 +109,11 @@
 
 ### Exec 子命令
 
-- `/exec <命令>`
-- `/exec local <命令>`
-- `/exec sandbox <命令>`
-- `/exec python <代码>`
-- `/exec config`
+- `/exec <命令>`（管理员）
+- `/exec local <命令>`（管理员）
+- `/exec sandbox <命令>`（管理员）
+- `/exec python <代码>`（管理员）
+- `/exec config`（管理员）
 
 ### Exec 示例
 
@@ -125,13 +125,13 @@
 
 ## `/debug`
 
-用于查看状态、自诊断和问题分析。
+用于查看状态、自诊断和问题分析，仅管理员可用。
 
 ### Debug 子命令
 
-- `/debug status`
-- `/debug logs`
-- `/debug analyze <问题描述>`
+- `/debug status`（管理员）
+- `/debug logs`（管理员）
+- `/debug analyze <问题描述>`（管理员）
 
 ### Debug 示例
 
@@ -143,21 +143,21 @@
 
 ## `/sandbox`
 
-这是更底层的沙盒接口，适合直接操作执行环境。
+这是更底层的沙盒接口，适合直接操作执行环境，仅管理员可用。
 
 ### Sandbox 子命令
 
-- `/sandbox status`
-- `/sandbox exec <代码>`
-- `/sandbox bash <命令>`
-- `/sandbox files [路径]`
-- `/sandbox upload <路径> <内容>`
-- `/sandbox download <路径>`
-- `/sandbox install <包名>`
-- `/sandbox packages`
-- `/sandbox variables`
-- `/sandbox restart`
-- `/sandbox url <url> <路径>`
+- `/sandbox status`（管理员）
+- `/sandbox exec <代码>`（管理员）
+- `/sandbox bash <命令>`（管理员）
+- `/sandbox files [路径]`（管理员）
+- `/sandbox upload <路径> <内容>`（管理员）
+- `/sandbox download <路径>`（管理员）
+- `/sandbox install <包名>`（管理员）
+- `/sandbox packages`（管理员）
+- `/sandbox variables`（管理员）
+- `/sandbox restart`（管理员）
+- `/sandbox url <url> <路径>`（管理员）
 
 ### Sandbox 示例
 

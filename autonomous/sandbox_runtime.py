@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -79,12 +80,18 @@ class SandboxRuntime:
     ) -> CodeSandbox:
         """获取健康的缓存沙盒，必要时创建新实例。"""
 
+        resolved_session_id = self._resolve_session_id(event, session_id)
         selected_mode = mode or self.detect_mode()
-        cache_key = self._cache_key(selected_mode, session_id)
+        cache_key = self._cache_key(selected_mode, resolved_session_id)
         cached_sandbox = await self._get_cached_sandbox(cache_key)
         if cached_sandbox is not None:
             return cached_sandbox
-        return await self._create_or_fallback(selected_mode, event, session_id, cache_key)
+        return await self._create_or_fallback(
+            selected_mode,
+            event,
+            resolved_session_id,
+            cache_key,
+        )
 
     async def _get_cached_sandbox(self, cache_key: str) -> CodeSandbox | None:
         """返回健康的缓存沙盒，不健康时移除缓存。"""
@@ -163,7 +170,7 @@ class SandboxRuntime:
             context=self.context,
             event=event,
             session_id=session_id,
-            cwd=self.default_cwd,
+            cwd=self._get_workspace_cwd(session_id),
             timeout=self.task_timeout,
         )
         await sandbox.astart()
@@ -306,3 +313,35 @@ class SandboxRuntime:
         """生成缓存键。"""
 
         return f"{mode}:{session_id or 'default'}"
+
+    @staticmethod
+    def _resolve_session_id(event: Any, session_id: str | None) -> str | None:
+        """优先使用显式 session_id，否则从事件对象提取稳定会话标识。"""
+
+        if session_id:
+            return str(session_id)
+        if event is None:
+            return None
+
+        for attr_name in ("session_id", "unified_msg_origin"):
+            value = getattr(event, attr_name, None)
+            if value:
+                return str(value)
+
+        get_sender_id = getattr(event, "get_sender_id", None)
+        if callable(get_sender_id):
+            try:
+                sender_id = get_sender_id()
+            except Exception:
+                return None
+            if sender_id:
+                return str(sender_id)
+        return None
+
+    def _get_workspace_cwd(self, session_id: str | None) -> str:
+        """为每个会话分配独立工作目录，避免共享 /workspace。"""
+
+        if not session_id:
+            return self.default_cwd
+        digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+        return f"{self.default_cwd}/sessions/{digest}"

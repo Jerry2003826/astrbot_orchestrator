@@ -97,6 +97,7 @@ class FakeSandboxFactory:
             mode: list(sandboxes) for mode, sandboxes in sandboxes_by_mode.items()
         }
         self.calls: list[str] = []
+        self.invocations: list[dict[str, Any]] = []
 
     def __call__(
         self,
@@ -111,10 +112,15 @@ class FakeSandboxFactory:
 
         del context
         del event
-        del session_id
-        del cwd
-        del timeout
         self.calls.append(mode)
+        self.invocations.append(
+            {
+                "mode": mode,
+                "session_id": session_id,
+                "cwd": cwd,
+                "timeout": timeout,
+            }
+        )
 
         sandboxes = self.sandboxes_by_mode.setdefault(mode, [])
         if sandboxes:
@@ -647,3 +653,22 @@ def test_fake_sandbox_factory_returns_default_sandbox_when_queue_empty() -> None
 
     assert isinstance(sandbox, FakeSandbox)
     assert sandbox.mode == "local"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_runtime_derives_session_cache_key_and_workspace_from_event() -> None:
+    """未显式传 session_id 时应从事件对象导出会话隔离信息。"""
+
+    factory = FakeSandboxFactory({"local": [FakeSandbox(mode="local")]})
+    runtime = SandboxRuntime(
+        context=FakeContext({}),
+        config={},
+        sandbox_factory=factory,
+        inside_sandbox_detector=lambda: False,
+    )
+    event = type("Evt", (), {"session_id": "chat-42"})()
+
+    await runtime.get_sandbox(event=event, mode="local")
+
+    assert factory.invocations[0]["session_id"] == "chat-42"
+    assert factory.invocations[0]["cwd"].startswith("/workspace/sessions/")

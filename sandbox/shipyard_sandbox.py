@@ -16,7 +16,7 @@ import logging
 import shlex
 import typing as t
 
-from ..shared import ensure_within_base, quote_shell_path
+from ..shared import quote_shell_path, resolve_path_within_base
 from .base import CodeSandbox
 from .types import ExecChunk, ExecResult, SandboxFile
 
@@ -209,7 +209,7 @@ class ShipyardSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """上传文件到 Shipyard 沙盒"""
-        full_path = ensure_within_base(self.cwd, remote_path)
+        full_path = resolve_path_within_base(self.cwd, remote_path)
         quoted_path = quote_shell_path(full_path)
 
         # 确保目录存在
@@ -236,7 +236,7 @@ class ShipyardSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """从 Shipyard 沙盒下载文件"""
-        full_path = ensure_within_base(self.cwd, remote_path)
+        full_path = resolve_path_within_base(self.cwd, remote_path)
         quoted_path = quote_shell_path(full_path)
 
         # 检查文件是否存在
@@ -266,7 +266,7 @@ class ShipyardSandbox(CodeSandbox):
         path: str = ".",
     ) -> t.List[SandboxFile]:
         """列出 Shipyard 沙盒中的文件"""
-        target_dir = self.cwd if path == "." else ensure_within_base(self.cwd, path)
+        target_dir = self.cwd if path == "." else resolve_path_within_base(self.cwd, path)
         quoted_dir = quote_shell_path(target_dir)
 
         result = await self._shell_exec(

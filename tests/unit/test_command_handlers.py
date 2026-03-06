@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from astrbot_orchestrator_v5.entrypoints.command_handlers import CommandHandlers
+from astrbot_orchestrator_v5.entrypoints import command_handlers as command_handlers_module
+from astrbot_orchestrator_v5.entrypoints.command_handlers import CommandHandlers, CommandRateLimiter
 from astrbot_orchestrator_v5.sandbox.types import ExecChunk, ExecResult, SandboxFile
 
 if TYPE_CHECKING:
@@ -769,6 +771,7 @@ async def test_command_handlers_skill_routes_multiple_actions(
         build_request_context=lambda *_args: None,
     )
 
+    fake_event.role = "admin"
     fake_event.message_str = "list"
     assert await collect_results(handlers.handle_skill(fake_event)) == ["skill-list"]
 
@@ -810,6 +813,17 @@ async def test_command_handlers_skill_covers_help_missing_name_and_invalid_actio
     fake_event.message_str = "create"
     assert await collect_results(handlers.handle_skill(fake_event)) == ["请提供 Skill 名称"]
 
+    fake_event.role = "member"
+    fake_event.message_str = "list"
+    assert await collect_results(handlers.handle_skill(fake_event)) == [
+        "❌ 只有管理员可以查看 Skill 列表"
+    ]
+
+    fake_event.message_str = "read weather"
+    assert await collect_results(handlers.handle_skill(fake_event)) == [
+        "❌ 只有管理员可以读取 Skill"
+    ]
+
     fake_event.message_str = "oops"
     assert await collect_results(handlers.handle_skill(fake_event)) == [
         "无效命令，请使用 /skill 查看帮助"
@@ -829,7 +843,9 @@ async def test_command_handlers_mcp_routes_multiple_actions(
     )
 
     fake_event.message_str = "list"
-    assert await collect_results(handlers.handle_mcp(fake_event)) == ["mcp-list"]
+    assert await collect_results(handlers.handle_mcp(fake_event)) == [
+        "❌ 只有管理员可以查看 MCP 配置"
+    ]
 
     fake_event.message_str = "add search https://example.com/mcp"
     fake_event.role = "member"
@@ -841,9 +857,19 @@ async def test_command_handlers_mcp_routes_multiple_actions(
     ]
 
     fake_event.message_str = "test search"
+    fake_event.role = "member"
+    assert await collect_results(handlers.handle_mcp(fake_event)) == ["❌ 只有管理员可以测试 MCP"]
+
+    fake_event.role = "admin"
     assert await collect_results(handlers.handle_mcp(fake_event)) == ["test:search"]
 
     fake_event.message_str = "tools search"
+    fake_event.role = "member"
+    assert await collect_results(handlers.handle_mcp(fake_event)) == [
+        "❌ 只有管理员可以查看 MCP 工具"
+    ]
+
+    fake_event.role = "admin"
     assert await collect_results(handlers.handle_mcp(fake_event)) == ["tools:search"]
 
     fake_event.message_str = "unknown"
@@ -922,6 +948,7 @@ async def test_command_handlers_debug_routes_status_logs_analyze_and_help(
         runtime=SimpleNamespace(debugger=FakeDebugger()),
         build_request_context=lambda *_args: None,
     )
+    fake_event.role = "admin"
 
     fake_event.message_str = "status"
     assert await collect_results(handlers.handle_debug(fake_event)) == ["debug-status"]
@@ -938,6 +965,62 @@ async def test_command_handlers_debug_routes_status_logs_analyze_and_help(
     help_results = await collect_results(handlers.handle_debug(fake_event))
     assert len(help_results) == 1
     assert "Debug 工具" in help_results[0]
+
+
+@pytest.mark.asyncio
+async def test_command_handlers_debug_requires_admin_and_writes_audit_log(
+    fake_event: "FakeEvent",
+    tmp_path: Any,
+) -> None:
+    """非管理员访问 `/debug` 时应拒绝并落审计日志。"""
+
+    context = FakeChatContext(provider_id="provider-z")
+    context.get_plugin_data_dir = lambda: str(tmp_path)
+    handlers = CommandHandlers(
+        context=context,
+        runtime=SimpleNamespace(debugger=FakeDebugger()),
+        build_request_context=lambda *_args: None,
+    )
+    fake_event.role = "member"
+    fake_event.message_str = "status"
+
+    assert await collect_results(handlers.handle_debug(fake_event)) == ["❌ 只有管理员可以使用 Debug"]
+
+    audit_log_path = tmp_path / "security_audit.jsonl"
+    records = [json.loads(line) for line in audit_log_path.read_text(encoding="utf-8").splitlines()]
+    assert records[-1]["command"] == "debug"
+    assert records[-1]["action"] == "access"
+    assert records[-1]["outcome"] == "denied"
+    assert records[-1]["actor_id"] == fake_event.sender_id
+
+
+@pytest.mark.asyncio
+async def test_command_handlers_debug_rate_limits_per_sender(
+    fake_event: "FakeEvent",
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """同一发送者的 `/debug` 请求应命中入口限流。"""
+
+    monkeypatch.setitem(
+        command_handlers_module._RATE_LIMIT_RULES,
+        "debug",
+        command_handlers_module.RateLimitRule(1, 60.0, "⏳ Debug 请求过于频繁，请稍后再试"),
+    )
+    debugger = FakeDebugger()
+    handlers = CommandHandlers(
+        context=FakeChatContext(provider_id="provider-z"),
+        runtime=SimpleNamespace(debugger=debugger),
+        build_request_context=lambda *_args: None,
+        rate_limiter=CommandRateLimiter(clock=lambda: 0.0),
+    )
+    fake_event.role = "admin"
+    fake_event.message_str = "status"
+
+    assert await collect_results(handlers.handle_debug(fake_event)) == ["debug-status"]
+    assert await collect_results(handlers.handle_debug(fake_event)) == [
+        "⏳ Debug 请求过于频繁，请稍后再试"
+    ]
+    assert debugger.calls == [("get_system_status", (), {})]
 
 
 @pytest.mark.asyncio

@@ -93,6 +93,7 @@ class RequestContext:
         event = legacy_context.get("event")
         reserved_keys = {"user_id", "session", "umo", "is_admin", "event", "request_id"}
         metadata = {key: value for key, value in legacy_context.items() if key not in reserved_keys}
+        event_is_admin = getattr(event, "role", "") == "admin" if event is not None else False
 
         return cls(
             request_text=user_request,
@@ -102,7 +103,7 @@ class RequestContext:
             session_id=str(legacy_context.get("session") or ""),
             unified_msg_origin=str(legacy_context.get("umo") or ""),
             event=event,
-            policy=ExecutionPolicy.from_admin(bool(legacy_context.get("is_admin", False))),
+            policy=ExecutionPolicy.from_admin(event_is_admin),
             metadata=metadata,
         )
 

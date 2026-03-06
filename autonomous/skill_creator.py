@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Any, cast
 
-from ..shared import slugify_identifier
+from ..shared import ensure_within_base, slugify_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ description: {description}
                 scripts_dir.mkdir(exist_ok=True)
 
                 for filename, script_content in scripts.items():
-                    script_path = scripts_dir / filename
+                    script_path = ensure_within_base(scripts_dir, filename)
                     script_path.write_text(script_content, encoding="utf-8")
 
             # 激活 Skill

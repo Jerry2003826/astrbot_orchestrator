@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 import json
+import socket
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -255,38 +256,74 @@ def test_mcp_configurator_get_mcp_config_path_supports_import_and_fallback(
 
 
 @pytest.mark.parametrize(
-    "url",
+    ("url", "resolved_hosts"),
     [
-        "https://example.com/sse",
-        "https://mcp.example.org/api",
-        "https://8.8.8.8/mcp",
+        ("https://example.com/sse", ["93.184.216.34"]),
+        ("https://mcp.example.org/api", ["8.8.4.4"]),
+        ("https://8.8.8.8/mcp", ["8.8.8.8"]),
     ],
 )
-def test_mcp_configurator_validate_server_url_accepts_public_https(url: str) -> None:
+def test_mcp_configurator_validate_server_url_accepts_public_https(
+    url: str,
+    resolved_hosts: list[str],
+    monkeypatch: "MonkeyPatch",
+) -> None:
     """公共 HTTPS 地址应通过校验。"""
 
+    monkeypatch.setattr(
+        mcp_module.socket,
+        "getaddrinfo",
+        lambda host, port, type=socket.SOCK_STREAM: [
+            (socket.AF_INET, type, 6, "", (ip, port)) for ip in resolved_hosts
+        ],
+    )
     MCPConfiguratorTool._validate_server_url(url)
 
 
 @pytest.mark.parametrize(
-    ("url", "message"),
+    ("url", "message", "resolved_hosts"),
     [
-        ("http://example.com", "仅允许使用 HTTPS"),
-        ("https://", "缺少主机名"),
-        ("https://localhost:8080", "拒绝本地或局域网主机"),
-        ("https://demo.local/service", "拒绝本地或局域网主机"),
-        ("https://127.0.0.1/api", "拒绝私网、环回或保留地址"),
-        ("https://10.0.0.5/api", "拒绝私网、环回或保留地址"),
+        ("http://example.com", "仅允许使用 HTTPS", ["93.184.216.34"]),
+        ("https://", "缺少主机名", ["93.184.216.34"]),
+        ("https://localhost:8080", "拒绝本地或局域网主机", ["127.0.0.1"]),
+        ("https://demo.local/service", "拒绝本地或局域网主机", ["127.0.0.1"]),
+        ("https://127.0.0.1/api", "拒绝私网、环回或保留地址", ["127.0.0.1"]),
+        ("https://10.0.0.5/api", "拒绝私网、环回或保留地址", ["10.0.0.5"]),
+        ("https://internal.example/api", "拒绝私网、环回或保留地址", ["127.0.0.1"]),
     ],
 )
 def test_mcp_configurator_validate_server_url_rejects_unsafe_targets(
     url: str,
     message: str,
+    resolved_hosts: list[str],
+    monkeypatch: "MonkeyPatch",
 ) -> None:
     """非 HTTPS 或局域网地址应被安全校验拦截。"""
 
+    monkeypatch.setattr(
+        mcp_module.socket,
+        "getaddrinfo",
+        lambda host, port, type=socket.SOCK_STREAM: [
+            (socket.AF_INET, type, 6, "", (ip, port)) for ip in resolved_hosts
+        ],
+    )
     with pytest.raises(ValueError, match=message):
         MCPConfiguratorTool._validate_server_url(url)
+
+
+def test_mcp_configurator_validate_server_url_rejects_unresolvable_hostname(
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """无法解析的主机名应被视为不安全目标。"""
+
+    def fail_lookup(host: str, port: int, type: int = socket.SOCK_STREAM) -> list[Any]:
+        del host, port, type
+        raise socket.gaierror("dns failed")
+
+    monkeypatch.setattr(mcp_module.socket, "getaddrinfo", fail_lookup)
+
+    with pytest.raises(ValueError, match="主机名无法解析"):
+        MCPConfiguratorTool._validate_server_url("https://missing.example/api")
 
 
 def test_mcp_configurator_load_and_save_config_handles_missing_and_invalid_json(
@@ -394,18 +431,26 @@ async def test_mcp_configurator_add_server_success_persists_and_enables(
     tool_manager = FakeToolManager()
     tool = MCPConfiguratorTool(context=FakeContext(tool_manager=tool_manager))
     monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    monkeypatch.setenv("MCP_AUTH_TOKEN", "Bearer demo")
+    monkeypatch.setattr(
+        mcp_module.socket,
+        "getaddrinfo",
+        lambda host, port, type=socket.SOCK_STREAM: [
+            (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
+        ],
+    )
 
     result = await tool.add_server(
         name="search",
         url="https://example.com/sse",
         transport="streamable_http",
-        headers={"Authorization": "Bearer demo"},
+        headers={"Authorization": "env:MCP_AUTH_TOKEN"},
     )
 
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert "✅ MCP 服务器 `search` 添加成功！" in result
     assert "传输: streamable_http" in result
-    assert saved["mcpServers"]["search"]["headers"] == {"Authorization": "Bearer demo"}
+    assert saved["mcpServers"]["search"]["headers"] == {"Authorization": "env:MCP_AUTH_TOKEN"}
     assert tool_manager.enable_calls == [
         {
             "name": "search",
@@ -420,6 +465,33 @@ async def test_mcp_configurator_add_server_success_persists_and_enables(
 
 
 @pytest.mark.asyncio
+async def test_mcp_configurator_add_server_rejects_raw_sensitive_headers(
+    config_path: Path,
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """敏感请求头不能以明文形式写入配置。"""
+
+    tool = MCPConfiguratorTool(context=FakeContext(tool_manager=FakeToolManager()))
+    monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    monkeypatch.setattr(
+        mcp_module.socket,
+        "getaddrinfo",
+        lambda host, port, type=socket.SOCK_STREAM: [
+            (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
+        ],
+    )
+
+    result = await tool.add_server(
+        name="search",
+        url="https://example.com/sse",
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert result == "❌ 添加失败: 敏感请求头 `Authorization` 必须使用环境变量引用"
+    assert not config_path.exists()
+
+
+@pytest.mark.asyncio
 async def test_mcp_configurator_add_server_handles_duplicate_enable_failure_and_validation(
     config_path: Path,
     monkeypatch: "MonkeyPatch",
@@ -429,6 +501,13 @@ async def test_mcp_configurator_add_server_handles_duplicate_enable_failure_and_
     tool_manager = FakeToolManager(enable_error=RuntimeError("enable failed"))
     tool = MCPConfiguratorTool(context=FakeContext(tool_manager=tool_manager))
     monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    monkeypatch.setattr(
+        mcp_module.socket,
+        "getaddrinfo",
+        lambda host, port, type=socket.SOCK_STREAM: [
+            (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
+        ],
+    )
 
     tool._save_mcp_config(
         {"mcpServers": {"existing": {"url": "https://example.com", "active": True}}}
@@ -455,6 +534,13 @@ async def test_mcp_configurator_add_server_skips_enable_when_tool_manager_unavai
 
     tool = MCPConfiguratorTool(context=FakeContext(tool_manager=None))
     monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    monkeypatch.setattr(
+        mcp_module.socket,
+        "getaddrinfo",
+        lambda host, port, type=socket.SOCK_STREAM: [
+            (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
+        ],
+    )
 
     result = await tool.add_server("search", "https://example.com/sse")
 
@@ -572,13 +658,21 @@ async def test_mcp_configurator_test_server_covers_streamable_http_and_sse_paths
 
     tool = MCPConfiguratorTool(context=FakeContext())
     monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    monkeypatch.setenv("MCP_TEST_TOKEN", "Bearer test")
+    monkeypatch.setattr(
+        mcp_module.socket,
+        "getaddrinfo",
+        lambda host, port, type=socket.SOCK_STREAM: [
+            (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
+        ],
+    )
     tool._save_mcp_config(
         {
             "mcpServers": {
                 "http-server": {
                     "url": "https://example.com/http",
                     "transport": "streamable_http",
-                    "headers": {"Authorization": "Bearer test"},
+                    "headers": {"Authorization": "env:MCP_TEST_TOKEN"},
                 },
                 "sse-server": {
                     "url": "https://example.com/sse",
@@ -621,6 +715,13 @@ async def test_mcp_configurator_test_server_covers_remaining_status_branches(
 
     tool = MCPConfiguratorTool(context=FakeContext())
     monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    monkeypatch.setattr(
+        mcp_module.socket,
+        "getaddrinfo",
+        lambda host, port, type=socket.SOCK_STREAM: [
+            (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
+        ],
+    )
     tool._save_mcp_config(
         {
             "mcpServers": {

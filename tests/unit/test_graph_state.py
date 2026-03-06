@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from astrbot_orchestrator_v5.runtime.graph_state import OrchestratorGraphState
@@ -29,7 +30,7 @@ def test_orchestrator_graph_state_exposes_request_properties() -> None:
     request_context = RequestContext.from_legacy(
         user_request="帮我分析需求",
         provider_id="provider-a",
-        context={"is_admin": True, "request_id": "req-123"},
+        context={"event": SimpleNamespace(role="admin"), "request_id": "req-123"},
     )
 
     state = OrchestratorGraphState(request_context=request_context)

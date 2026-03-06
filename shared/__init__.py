@@ -5,6 +5,7 @@ from .path_safety import (
     UnsafePathError,
     ensure_within_base,
     quote_shell_path,
+    resolve_path_within_base,
     sanitize_relative_path,
     slugify_identifier,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "ensure_within_base",
     "evaluate_condition",
     "quote_shell_path",
+    "resolve_path_within_base",
     "sanitize_relative_path",
     "slugify_identifier",
 ]

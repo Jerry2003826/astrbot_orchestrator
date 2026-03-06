@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -263,7 +264,7 @@ async def test_dynamic_orchestrator_process_request_uses_meta_orchestrator_for_c
     request_context = RequestContext.from_legacy(
         user_request="帮我做一个复杂网站",
         provider_id="provider-x",
-        context={"is_admin": True, "event": object()},
+        context={"event": SimpleNamespace(role="admin")},
     )
 
     result = await orchestrator.process_request(request_context)
@@ -332,7 +333,7 @@ async def test_dynamic_orchestrator_process_request_executes_plan_and_writes_fil
     request_context = RequestContext.from_legacy(
         user_request="写一个 demo 程序",
         provider_id="provider-x",
-        context={"is_admin": True, "event": object()},
+        context={"event": SimpleNamespace(role="admin")},
     )
 
     result = await orchestrator.process_request(request_context)
@@ -420,7 +421,7 @@ async def test_dynamic_orchestrator_process_request_returns_debug_analysis_on_fa
     request_context = RequestContext.from_legacy(
         user_request="这个请求会失败",
         provider_id="provider-x",
-        context={"is_admin": False},
+        context={"event": SimpleNamespace(role="member")},
     )
 
     result = await orchestrator.process_request(request_context)
@@ -477,7 +478,7 @@ async def test_dynamic_orchestrator_subagent_fallback_and_finalize_with_process(
     request_context = RequestContext.from_legacy(
         user_request="做一个复杂任务",
         provider_id="provider-x",
-        context={"is_admin": True},
+        context={"event": SimpleNamespace(role="admin")},
     )
     state = OrchestratorGraphState(request_context=request_context)
     state.intent = {
@@ -517,7 +518,7 @@ async def test_dynamic_orchestrator_build_error_result_falls_back_when_debugger_
         request_context=RequestContext.from_legacy(
             user_request="会失败的请求",
             provider_id="provider-x",
-            context={"is_admin": False},
+            context={"event": SimpleNamespace(role="member")},
         )
     )
 
@@ -553,7 +554,7 @@ async def test_dynamic_orchestrator_process_wrappers_delegate_correctly(
     auto_result = await orchestrator.process_autonomous(
         user_request="hello",
         provider_id="provider-x",
-        context={"is_admin": True},
+        context={"event": SimpleNamespace(role="admin")},
     )
 
     assert auto_result == {"status": "success", "answer": "ok"}

@@ -379,6 +379,26 @@ class CodeWriter:
         self.executor = executor
         self.base_path = base_path
 
+    async def _resolve_base_path(self, event) -> str:
+        """优先使用当前会话沙盒的工作目录，避免共享 /workspace。"""
+
+        if self.base_path != "/workspace":
+            return self.base_path
+
+        get_sandbox = getattr(self.executor, "get_sandbox", None)
+        if not callable(get_sandbox):
+            return self.base_path
+
+        try:
+            sandbox = await get_sandbox(event=event)
+        except TypeError:
+            sandbox = await get_sandbox(event)
+        except Exception:
+            return self.base_path
+
+        cwd = getattr(sandbox, "cwd", "")
+        return str(cwd) if cwd else self.base_path
+
     async def write_files(
         self, files: Dict[str, str], event, project_name: str = "project"
     ) -> Tuple[bool, List[str]]:
@@ -393,7 +413,8 @@ class CodeWriter:
         Returns:
             (success, created_files)
         """
-        project_path = f"{self.base_path}/{project_name}"
+        base_path = await self._resolve_base_path(event)
+        project_path = f"{base_path}/{project_name}"
         created_files = []
 
         try:
@@ -436,7 +457,8 @@ class CodeWriter:
 
     async def get_project_files(self, event, project_name: str = "project") -> List[str]:
         """获取项目中的文件列表"""
-        project_path = f"{self.base_path}/{project_name}"
+        base_path = await self._resolve_base_path(event)
+        project_path = f"{base_path}/{project_name}"
 
         try:
             result = await self.executor.execute(f"find {project_path} -type f", event)

@@ -12,12 +12,24 @@ import ipaddress
 import json
 import logging
 import os
+import re
+import socket
 from typing import Any, cast
 from urllib.parse import urlparse
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
+_SENSITIVE_HEADER_NAMES = {
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "api-key",
+    "x-auth-token",
+    "cookie",
+    "set-cookie",
+}
+_ENV_HEADER_PATTERN = re.compile(r"^\$\{([A-Z0-9_]+)\}$|^env:([A-Z0-9_]+)$")
 
 
 class MCPConfiguratorTool:
@@ -59,21 +71,65 @@ class MCPConfiguratorTool:
         hostname = parsed.hostname.lower()
         if hostname in {"localhost"} or hostname.endswith(".local"):
             raise ValueError("拒绝本地或局域网主机")
+        port = parsed.port or 443
 
         try:
-            ip_addr = ipaddress.ip_address(hostname)
-        except ValueError:
-            return
+            candidate_ips = {item[4][0] for item in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)}
+        except socket.gaierror as exc:
+            raise ValueError(f"MCP 服务主机名无法解析: {hostname}") from exc
 
-        if (
-            ip_addr.is_private
-            or ip_addr.is_loopback
-            or ip_addr.is_link_local
-            or ip_addr.is_reserved
-            or ip_addr.is_multicast
-            or ip_addr.is_unspecified
-        ):
-            raise ValueError("拒绝私网、环回或保留地址")
+        for candidate_ip in candidate_ips:
+            ip_addr = ipaddress.ip_address(candidate_ip)
+            if (
+                ip_addr.is_private
+                or ip_addr.is_loopback
+                or ip_addr.is_link_local
+                or ip_addr.is_reserved
+                or ip_addr.is_multicast
+                or ip_addr.is_unspecified
+            ):
+                raise ValueError("拒绝私网、环回或保留地址")
+
+    @staticmethod
+    def _normalize_headers_for_storage(headers: dict[str, str] | None) -> dict[str, str]:
+        """校验并标准化要写入配置文件的请求头。"""
+
+        if not headers:
+            return {}
+
+        normalized: dict[str, str] = {}
+        for raw_name, raw_value in headers.items():
+            name = str(raw_name).strip()
+            value = str(raw_value).strip()
+            if not name or not value:
+                raise ValueError("请求头名称和值不能为空")
+            if any(token in name or token in value for token in ("\r", "\n")):
+                raise ValueError("请求头不能包含换行")
+            if name.lower() in _SENSITIVE_HEADER_NAMES and _ENV_HEADER_PATTERN.fullmatch(value) is None:
+                raise ValueError(f"敏感请求头 `{name}` 必须使用环境变量引用")
+            normalized[name] = value
+        return normalized
+
+    @staticmethod
+    def _resolve_runtime_headers(headers: dict[str, str] | None) -> dict[str, str]:
+        """在真正发起请求前解析环境变量引用。"""
+
+        if not headers:
+            return {}
+
+        resolved: dict[str, str] = {}
+        for name, value in headers.items():
+            match = _ENV_HEADER_PATTERN.fullmatch(value.strip())
+            if match is None:
+                resolved[name] = value
+                continue
+
+            env_name = match.group(1) or match.group(2)
+            env_value = os.environ.get(env_name)
+            if not env_value:
+                raise ValueError(f"环境变量 `{env_name}` 未设置，无法解析请求头 `{name}`")
+            resolved[name] = env_value
+        return resolved
 
     def _load_mcp_config(self) -> dict[str, Any]:
         """加载 MCP 配置"""
@@ -148,18 +204,21 @@ class MCPConfiguratorTool:
             headers: 可选的请求头
         """
         try:
-            self._validate_server_url(url)
             config = self._load_mcp_config()
 
             # 检查是否已存在
             if name in config.get("mcpServers", {}):
                 return f"❌ MCP 服务器 `{name}` 已存在，请使用其他名称"
 
+            self._validate_server_url(url)
+            stored_headers = self._normalize_headers_for_storage(headers)
+            runtime_headers = self._resolve_runtime_headers(stored_headers)
+
             # 添加配置
             server_config: dict[str, Any] = {"url": url, "transport": transport, "active": True}
 
-            if headers:
-                server_config["headers"] = headers
+            if stored_headers:
+                server_config["headers"] = stored_headers
 
             config.setdefault("mcpServers", {})[name] = server_config
 
@@ -170,7 +229,10 @@ class MCPConfiguratorTool:
             tool_manager = self._get_tool_manager()
             if tool_manager:
                 try:
-                    await tool_manager.enable_mcp_server(name=name, config=server_config)
+                    runtime_config = dict(server_config)
+                    if runtime_headers:
+                        runtime_config["headers"] = runtime_headers
+                    await tool_manager.enable_mcp_server(name=name, config=runtime_config)
                 except Exception as e:
                     return f"⚠️ MCP 服务器 `{name}` 已添加到配置，但启用失败: {str(e)}\n\n请检查 URL 是否正确，或重启 AstrBot"
 
@@ -218,7 +280,7 @@ class MCPConfiguratorTool:
         server_config = config["mcpServers"][name]
         url = server_config.get("url", "")
         transport = server_config.get("transport", "sse")
-        headers = server_config.get("headers", {})
+        headers = self._resolve_runtime_headers(cast(dict[str, str], server_config.get("headers", {})))
         self._validate_server_url(url)
 
         try:

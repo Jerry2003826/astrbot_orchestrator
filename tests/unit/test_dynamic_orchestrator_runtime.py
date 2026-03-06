@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -47,7 +48,7 @@ async def test_dynamic_orchestrator_process_request_uses_runtime_pipeline(
     request_context = RequestContext.from_legacy(
         user_request="什么是 LCEL？",
         provider_id="provider-x",
-        context={"is_admin": False},
+        context={"event": SimpleNamespace(role="member")},
     )
 
     result = await orchestrator.process_request(request_context)

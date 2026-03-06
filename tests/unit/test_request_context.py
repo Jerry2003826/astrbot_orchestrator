@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from astrbot_orchestrator_v5.runtime.request_context import RequestContext
@@ -76,3 +77,21 @@ def test_request_context_round_trips_legacy_context() -> None:
     assert request_context.policy.allow_code_execution is False
     assert exported["trace_id"] == "trace-xyz"
     assert exported["is_admin"] is False
+
+
+def test_request_context_from_legacy_only_uses_event_role_for_admin() -> None:
+    """旧上下文里的裸露 is_admin 标记不应再被直接信任。"""
+
+    member_context = RequestContext.from_legacy(
+        user_request="执行敏感操作",
+        provider_id="provider-c",
+        context={"is_admin": True, "event": SimpleNamespace(role="member")},
+    )
+    admin_context = RequestContext.from_legacy(
+        user_request="执行敏感操作",
+        provider_id="provider-c",
+        context={"is_admin": False, "event": SimpleNamespace(role="admin")},
+    )
+
+    assert member_context.is_admin is False
+    assert admin_context.is_admin is True

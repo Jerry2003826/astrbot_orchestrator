@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 import typing as t
 
-from ..shared import UnsafePathError, ensure_within_base
+from ..shared import UnsafePathError, resolve_path_within_base
 from .base import CodeSandbox
 from .types import ExecChunk, ExecResult, SandboxFile
 
@@ -187,7 +187,7 @@ class LocalSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """上传文件到本地工作目录"""
-        full_path = ensure_within_base(self.cwd, remote_path)
+        full_path = resolve_path_within_base(self.cwd, remote_path)
         dir_path = full_path.parent
         os.makedirs(dir_path, exist_ok=True)
 
@@ -208,7 +208,7 @@ class LocalSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """从本地工作目录下载文件"""
-        full_path = ensure_within_base(self.cwd, remote_path)
+        full_path = resolve_path_within_base(self.cwd, remote_path)
 
         if not os.path.exists(full_path):
             raise FileNotFoundError(f"文件不存在: {remote_path}")
@@ -228,7 +228,7 @@ class LocalSandbox(CodeSandbox):
     ) -> t.List[SandboxFile]:
         """列出本地工作目录中的文件"""
         try:
-            target_dir = Path(self.cwd) if path == "." else ensure_within_base(self.cwd, path)
+            target_dir = Path(self.cwd) if path == "." else resolve_path_within_base(self.cwd, path)
         except UnsafePathError:
             return []
 

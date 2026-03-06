@@ -82,6 +82,29 @@ def ensure_within_base(base_dir: str | Path, relative_path: str) -> Path:
     return target_path
 
 
+def resolve_path_within_base(base_dir: str | Path, candidate_path: str) -> Path:
+    """解析相对或绝对路径，并确保最终结果不越出基目录。"""
+
+    candidate = candidate_path.strip().replace("\\", "/")
+    candidate = _MULTISLASH_PATTERN.sub("/", candidate)
+
+    if not candidate:
+        raise UnsafePathError("路径不能为空")
+    if _CONTROL_CHAR_PATTERN.search(candidate):
+        raise UnsafePathError("路径包含控制字符")
+    if _SHELL_META_PATTERN.search(candidate):
+        raise UnsafePathError("路径包含 shell 元字符")
+
+    base_path = Path(base_dir).resolve()
+    if candidate.startswith("/"):
+        target_path = Path(candidate).resolve()
+        if target_path != base_path and base_path not in target_path.parents:
+            raise UnsafePathError("路径超出允许目录")
+        return target_path
+
+    return ensure_within_base(base_path, candidate)
+
+
 def slugify_identifier(raw_name: str, default: str = "generated") -> str:
     """将不可信名称转换为安全标识符。
 

@@ -25,6 +25,7 @@ import json
 import logging
 import typing as t
 
+from ..shared import resolve_path_within_base
 from .types import ExecChunk, ExecResult, SandboxFile, SandboxStatus
 
 logger = logging.getLogger(__name__)
@@ -200,7 +201,8 @@ class CodeSandbox(ABC):
             SandboxFile 下载后的文件对象
         """
         safe_url = json.dumps(url)
-        safe_file_path = json.dumps(file_path)
+        target_path = resolve_path_within_base(self.cwd, file_path)
+        safe_file_path = json.dumps(str(target_path))
         code = (
             "import httpx\n"
             "async with httpx.AsyncClient() as client:\n"

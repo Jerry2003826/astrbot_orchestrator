@@ -6,7 +6,7 @@ AstrBot 动态智能体编排器插件
 
 from typing import Any
 
-__version__ = "3.0.0"
+__version__ = "3.0.1"
 __author__ = "lijiarui"
 
 try:

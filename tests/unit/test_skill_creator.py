@@ -358,6 +358,27 @@ async def test_skill_creator_create_skill_covers_existing_success_scripts_and_no
 
 
 @pytest.mark.asyncio
+async def test_skill_creator_create_skill_rejects_unsafe_script_path(
+    tmp_path: Path,
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """脚本文件应限制在 skill/scripts 目录内。"""
+
+    tool = SkillCreatorTool(context=FakeContext())
+    monkeypatch.setattr(tool, "_get_skills_path", lambda: str(tmp_path))
+
+    result = await tool.create_skill(
+        "Unsafe Script Skill",
+        "desc",
+        "# body",
+        scripts={"../escape.py": "print('boom')"},
+    )
+
+    assert result.startswith("❌ 创建失败:")
+    assert not (tmp_path / "escape.py").exists()
+
+
+@pytest.mark.asyncio
 async def test_skill_creator_create_skill_handles_write_failure(
     tmp_path: Path,
     monkeypatch: "MonkeyPatch",

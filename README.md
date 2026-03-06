@@ -108,12 +108,12 @@ sequenceDiagram
 | 命令 | 作用 | 常见用法 |
 | --- | --- | --- |
 | `/agent` | 综合任务入口，适合自然语言请求、多步骤任务和自动编排 | `/agent 帮我分析这个需求并生成实现方案` |
-| `/plugin` | 插件市场搜索、安装、卸载、更新与代理查看 | `/plugin search 翻译` |
-| `/skill` | Skill 列表、创建、编辑、删除、读取 | `/skill read weather_query` |
-| `/mcp` | MCP 服务注册、删除、测试与工具查看 | `/mcp test search` |
-| `/exec` | 使用统一执行器执行命令或代码 | `/exec python print('hello')` |
-| `/debug` | 查看状态、日志与问题分析结果 | `/debug status` |
-| `/sandbox` | 直接使用底层沙盒接口进行执行、文件与包管理 | `/sandbox files /workspace` |
+| `/plugin` | 插件市场搜索、安装、卸载、更新与代理查看，安装/卸载/更新需管理员 | `/plugin search 翻译` |
+| `/skill` | Skill 列表、创建、编辑、删除、读取，列表/删除/读取需管理员 | `/skill read weather_query` |
+| `/mcp` | MCP 服务注册、删除、测试与工具查看，仅管理员可用 | `/mcp test search` |
+| `/exec` | 使用统一执行器执行命令或代码，仅管理员可用 | `/exec python print('hello')` |
+| `/debug` | 查看状态、日志与问题分析结果，仅管理员可用 | `/debug status` |
+| `/sandbox` | 直接使用底层沙盒接口进行执行、文件与包管理，仅管理员可用 | `/sandbox files /workspace` |
 
 完整命令说明见 [docs/commands.md](docs/commands.md)。
 
