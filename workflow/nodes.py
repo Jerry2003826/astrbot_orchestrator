@@ -2,9 +2,9 @@
 工作流节点定义
 """
 
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class NodeType(Enum):

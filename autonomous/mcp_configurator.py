@@ -7,12 +7,15 @@ MCP 配置管理工具
 - 查看 MCP 工具列表
 """
 
-import os
+import asyncio
+import ipaddress
 import json
 import logging
+import os
+from typing import Any, cast
+from urllib.parse import urlparse
+
 import aiohttp
-from typing import Dict, List, Any, Optional
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +27,10 @@ class MCPConfiguratorTool:
     管理 AstrBot 的 MCP 服务器配置
     """
     
-    def __init__(self, context):
+    def __init__(self, context: Any) -> None:
         self.context = context
     
-    def _get_tool_manager(self):
+    def _get_tool_manager(self) -> Any | None:
         """获取 FunctionToolManager"""
         try:
             return self.context.provider_manager.llm_tools
@@ -41,21 +44,50 @@ class MCPConfiguratorTool:
             return os.path.join(get_astrbot_data_path(), "mcp_config.json")
         except ImportError:
             return os.path.expanduser("~/.astrbot/data/mcp_config.json")
+
+    @staticmethod
+    def _validate_server_url(url: str) -> None:
+        """校验 MCP 服务 URL，拒绝不安全目标。"""
+
+        parsed = urlparse(url)
+        if parsed.scheme != "https":
+            raise ValueError("MCP 服务仅允许使用 HTTPS 地址")
+        if not parsed.hostname:
+            raise ValueError("MCP 服务地址缺少主机名")
+
+        hostname = parsed.hostname.lower()
+        if hostname in {"localhost"} or hostname.endswith(".local"):
+            raise ValueError("拒绝本地或局域网主机")
+
+        try:
+            ip_addr = ipaddress.ip_address(hostname)
+        except ValueError:
+            return
+
+        if (
+            ip_addr.is_private
+            or ip_addr.is_loopback
+            or ip_addr.is_link_local
+            or ip_addr.is_reserved
+            or ip_addr.is_multicast
+            or ip_addr.is_unspecified
+        ):
+            raise ValueError("拒绝私网、环回或保留地址")
     
-    def _load_mcp_config(self) -> Dict:
+    def _load_mcp_config(self) -> dict[str, Any]:
         """加载 MCP 配置"""
         config_path = self._get_mcp_config_path()
         
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception:
-                pass
+                    return cast(dict[str, Any], json.load(f))
+            except Exception as exc:
+                logger.warning("加载 MCP 配置失败: %s", exc)
         
         return {"mcpServers": {}}
     
-    def _save_mcp_config(self, config: Dict):
+    def _save_mcp_config(self, config: dict[str, Any]) -> None:
         """保存 MCP 配置"""
         config_path = self._get_mcp_config_path()
         
@@ -103,7 +135,7 @@ class MCPConfiguratorTool:
         name: str,
         url: str,
         transport: str = "sse",
-        headers: Optional[Dict] = None
+        headers: dict[str, str] | None = None,
     ) -> str:
         """
         添加 MCP 服务器
@@ -115,6 +147,7 @@ class MCPConfiguratorTool:
             headers: 可选的请求头
         """
         try:
+            self._validate_server_url(url)
             config = self._load_mcp_config()
             
             # 检查是否已存在
@@ -122,7 +155,7 @@ class MCPConfiguratorTool:
                 return f"❌ MCP 服务器 `{name}` 已存在，请使用其他名称"
             
             # 添加配置
-            server_config = {
+            server_config: dict[str, Any] = {
                 "url": url,
                 "transport": transport,
                 "active": True
@@ -189,6 +222,7 @@ class MCPConfiguratorTool:
         url = server_config.get("url", "")
         transport = server_config.get("transport", "sse")
         headers = server_config.get("headers", {})
+        self._validate_server_url(url)
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -263,7 +297,7 @@ class MCPConfiguratorTool:
         self,
         name: str,
         user_description: str,
-        provider_id: str
+        provider_id: str,
     ) -> str:
         """
         根据用户描述推荐或生成 MCP 配置
@@ -298,11 +332,8 @@ class MCPConfiguratorTool:
                 system_prompt="你是一个 MCP 协议专家，熟悉各种 MCP 服务的配置。"
             )
             
-            return response.completion_text
+            return cast(str, response.completion_text)
             
         except Exception as e:
             logger.error(f"生成 MCP 建议失败: {e}")
             return f"❌ 分析失败: {str(e)}"
-
-
-import asyncio  # 需要在文件顶部

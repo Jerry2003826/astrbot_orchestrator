@@ -8,8 +8,9 @@
 """
 
 import logging
+from typing import Any, cast
+
 import aiohttp
-from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,12 @@ class PluginManagerTool:
     支持 GitHub 加速
     """
     
-    def __init__(self, context):
+    def __init__(self, context: Any) -> None:
         self.context = context
-        self._plugin_cache: List[Dict] = []
+        self._plugin_cache: list[dict[str, Any]] = []
         self._cache_valid = False
     
-    def _get_plugin_manager(self):
+    def _get_plugin_manager(self) -> Any | None:
         """获取 AstrBot 的 PluginManager"""
         try:
             return self.context._star_manager
@@ -53,16 +54,16 @@ class PluginManagerTool:
             config = self.context._config
             # AstrBot 配置中的 GitHub 加速设置
             proxy = config.get("plugin_settings", {}).get("github_proxy", "")
-            return proxy
+            return cast(str, proxy)
         except Exception:
             return ""
     
-    async def _fetch_plugin_registry(self) -> List[Dict]:
+    async def _fetch_plugin_registry(self) -> list[dict[str, Any]]:
         """从插件市场获取插件列表"""
         if self._cache_valid:
             return self._plugin_cache
         
-        plugins = []
+        plugins: list[dict[str, Any]] = []
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -150,7 +151,7 @@ class PluginManagerTool:
         
         return "\n".join(lines)
     
-    async def install_plugin(self, repo_url: str, use_proxy: bool = None) -> str:
+    async def install_plugin(self, repo_url: str, use_proxy: bool | None = None) -> str:
         """
         安装插件
         
@@ -218,7 +219,7 @@ class PluginManagerTool:
         plugins = await self._fetch_plugin_registry()
         
         # 查找插件
-        target = None
+        target: dict[str, Any] | None = None
         for p in plugins:
             if p.get("name", "").lower() == plugin_name.lower():
                 target = p
@@ -331,7 +332,7 @@ class PluginManagerTool:
         
         return "\n".join(lines)
     
-    def invalidate_cache(self):
+    def invalidate_cache(self) -> None:
         """使缓存失效"""
         self._cache_valid = False
         self._plugin_cache = []

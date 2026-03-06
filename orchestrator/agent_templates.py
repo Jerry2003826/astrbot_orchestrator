@@ -4,9 +4,9 @@ SubAgent 模板库与配置定义
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-import uuid
 
 
 @dataclass

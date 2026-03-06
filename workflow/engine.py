@@ -4,18 +4,18 @@
 基于 AstrBot Context API 实现
 """
 
-import logging
 import asyncio
-import yaml
+import logging
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, cast
 
-from .nodes import (
-    WorkflowNode, WorkflowDefinition, WorkflowState,
-    NodeType, NodeStatus
-)
+import yaml
+
+from ..shared import SafeConditionError, evaluate_condition
+from .nodes import NodeStatus, NodeType, WorkflowDefinition, WorkflowNode, WorkflowState
 
 logger = logging.getLogger(__name__)
+NodeExecutionResult = dict[str, Any] | bool
 
 
 class WorkflowEngine:
@@ -27,47 +27,49 @@ class WorkflowEngine:
     
     def __init__(
         self,
-        context,
-        skill_loader=None,
-        mcp_bridge=None
-    ):
+        context: Any,
+        skill_loader: Any | None = None,
+        mcp_bridge: Any | None = None,
+    ) -> None:
         self.context = context
         self.skill_loader = skill_loader
         self.mcp_bridge = mcp_bridge
         
-        self.workflows: Dict[str, WorkflowDefinition] = {}
+        self.workflows: dict[str, WorkflowDefinition] = {}
         
         # 加载工作流
         self._load_workflows()
     
-    def _load_workflows(self):
+    def _load_workflows(self) -> None:
         """加载工作流定义"""
         workflows_dir = Path(__file__).parent.parent / "workflows"
         if workflows_dir.exists():
             for yaml_file in workflows_dir.glob("*.yaml"):
                 try:
                     self.load_from_yaml(str(yaml_file))
-                except Exception as e:
-                    logger.error(f"加载工作流失败 [{yaml_file}]: {e}")
+                except Exception as exc:
+                    logger.error("加载工作流失败 [%s]: %s", yaml_file, exc)
     
     def load_from_yaml(self, yaml_path: str) -> str:
         """从 YAML 文件加载工作流"""
         path = Path(yaml_path)
-        with open(path, 'r', encoding='utf-8') as f:
-            definition = yaml.safe_load(f)
+        with path.open("r", encoding="utf-8") as file_obj:
+            definition = cast(dict[str, Any] | None, yaml.safe_load(file_obj))
+        if not isinstance(definition, dict):
+            raise ValueError(f"工作流 YAML 格式无效: {yaml_path}")
         
-        workflow_id = definition.get('id', path.stem)
+        workflow_id = str(definition.get("id", path.stem))
         workflow = WorkflowDefinition.from_dict(definition)
         workflow.id = workflow_id
         
         self.workflows[workflow_id] = workflow
-        logger.info(f"已加载工作流: {workflow_id}")
+        logger.info("已加载工作流: %s", workflow_id)
         return workflow_id
     
-    def get_workflow(self, workflow_id: str) -> Optional[WorkflowDefinition]:
+    def get_workflow(self, workflow_id: str) -> WorkflowDefinition | None:
         return self.workflows.get(workflow_id)
     
-    def list_workflows(self) -> List[Dict[str, str]]:
+    def list_workflows(self) -> list[dict[str, str]]:
         return [
             {"id": w.id, "name": w.name, "description": w.description}
             for w in self.workflows.values()
@@ -76,8 +78,8 @@ class WorkflowEngine:
     async def execute(
         self,
         workflow_id: str,
-        initial_input: Optional[Dict] = None,
-        provider_id: str = None
+        initial_input: dict[str, Any] | None = None,
+        provider_id: str | None = None,
     ) -> WorkflowState:
         """执行工作流"""
         if workflow_id not in self.workflows:
@@ -86,7 +88,7 @@ class WorkflowEngine:
         workflow = self.workflows[workflow_id]
         
         state = WorkflowState(workflow_id=workflow_id)
-        state.variables = initial_input.copy() if initial_input else {}
+        state.variables = dict(initial_input) if initial_input else {}
         state.variables["_provider_id"] = provider_id
         state.status = NodeStatus.RUNNING
         
@@ -98,10 +100,10 @@ class WorkflowEngine:
             await self._execute_node(start_node, workflow, state)
             state.status = NodeStatus.COMPLETED
             
-        except Exception as e:
+        except Exception as exc:
             state.status = NodeStatus.FAILED
-            state.error = str(e)
-            logger.error(f"工作流执行失败: {e}")
+            state.error = str(exc)
+            logger.error("工作流执行失败: %s", exc)
         
         return state
     
@@ -109,17 +111,18 @@ class WorkflowEngine:
         self,
         node: WorkflowNode,
         workflow: WorkflowDefinition,
-        state: WorkflowState
-    ):
+        state: WorkflowState,
+    ) -> None:
         """执行单个节点"""
         state.node_status[node.id] = NodeStatus.RUNNING
+        result: NodeExecutionResult = {}
         
         try:
             if node.type == NodeType.START:
                 result = {"status": "started"}
             
             elif node.type == NodeType.END:
-                output_var = node.config.get("output_variable", "output")
+                output_var = str(node.config.get("output_variable", "output"))
                 result = {"output": state.get_variable(output_var)}
                 state.node_status[node.id] = NodeStatus.COMPLETED
                 return
@@ -152,30 +155,32 @@ class WorkflowEngine:
                 if next_node:
                     await self._execute_node(next_node, workflow, state)
                     
-        except Exception as e:
+        except Exception:
             state.node_status[node.id] = NodeStatus.FAILED
             raise
     
     async def _execute_agent_node(
         self,
         node: WorkflowNode,
-        state: WorkflowState
-    ) -> Dict:
+        state: WorkflowState,
+    ) -> dict[str, Any]:
         """执行 Agent 节点"""
+        if self.context is None:
+            raise RuntimeError("Context 不可用")
+
         config = node.config
         provider_id = state.get_variable("_provider_id")
         
         # 构建 prompt
-        system_prompt = config.get("system_prompt", "")
-        prompt = config.get("prompt", "")
+        system_prompt = str(config.get("system_prompt", ""))
+        prompt_value = state.resolve_variable(config.get("prompt", ""))
+        prompt = prompt_value if isinstance(prompt_value, str) else str(prompt_value)
         
         # 解析变量
-        prompt = state.resolve_variable(prompt)
-        if isinstance(prompt, str):
-            try:
-                prompt = prompt.format(**state.variables)
-            except KeyError:
-                pass
+        try:
+            prompt = prompt.format(**state.variables)
+        except KeyError:
+            pass
         
         # 调用 LLM
         response = await self.context.llm_generate(
@@ -184,10 +189,10 @@ class WorkflowEngine:
             system_prompt=system_prompt
         )
         
-        result = response.completion_text
+        result = str(response.completion_text)
         
         # 保存输出
-        output_var = config.get("output_variable", "output")
+        output_var = str(config.get("output_variable", "output"))
         state.set_variable(output_var, result)
         
         return {"response": result}
@@ -195,13 +200,13 @@ class WorkflowEngine:
     async def _execute_skill_node(
         self,
         node: WorkflowNode,
-        state: WorkflowState
-    ) -> Dict:
+        state: WorkflowState,
+    ) -> dict[str, Any]:
         """执行 Skill 节点"""
         if not self.skill_loader:
             raise RuntimeError("Skill 加载器不可用")
         
-        skill_name = node.config.get("skill")
+        skill_name = str(node.config.get("skill", ""))
         skill_content = self.skill_loader.get_skill_content(skill_name)
         
         if skill_content:
@@ -212,21 +217,22 @@ class WorkflowEngine:
     async def _execute_mcp_node(
         self,
         node: WorkflowNode,
-        state: WorkflowState
-    ) -> Dict:
+        state: WorkflowState,
+    ) -> dict[str, Any]:
         """执行 MCP 节点"""
         if not self.mcp_bridge:
             raise RuntimeError("MCP 桥接器不可用")
         
-        tool_name = node.config.get("tool")
-        params = {}
+        tool_name = str(node.config.get("tool", ""))
+        params: dict[str, Any] = {}
+        parameter_config = cast(dict[str, Any], node.config.get("parameters", {}))
         
-        for key, value in node.config.get("parameters", {}).items():
+        for key, value in parameter_config.items():
             params[key] = state.resolve_variable(value)
         
         result = await self.mcp_bridge.call_tool(tool_name, params)
         
-        output_var = node.config.get("output_variable", f"mcp_{tool_name}")
+        output_var = str(node.config.get("output_variable", f"mcp_{tool_name}"))
         state.set_variable(output_var, result)
         
         return {"tool": tool_name, "result": result}
@@ -234,43 +240,45 @@ class WorkflowEngine:
     def _evaluate_condition(
         self,
         node: WorkflowNode,
-        state: WorkflowState
+        state: WorkflowState,
     ) -> bool:
         """评估条件"""
         condition = node.condition or node.config.get("condition", "True")
+        condition_text = condition if isinstance(condition, str) else str(condition)
         
         try:
-            eval_locals = state.variables.copy()
-            eval_locals.update({"len": len, "bool": bool, "int": int, "str": str})
-            return bool(eval(condition, {"__builtins__": {}}, eval_locals))
-        except Exception:
+            return bool(evaluate_condition(condition_text, state.variables))
+        except SafeConditionError as exc:
+            logger.warning("工作流条件求值失败 [%s]: %s", node.id, exc)
             return False
     
     async def _execute_parallel_nodes(
         self,
         node: WorkflowNode,
         workflow: WorkflowDefinition,
-        state: WorkflowState
-    ) -> Dict:
+        state: WorkflowState,
+    ) -> dict[str, list[Any]]:
         """并行执行节点"""
-        parallel_ids = node.config.get("parallel_nodes", [])
+        parallel_ids = cast(list[str], node.config.get("parallel_nodes", []))
         
-        tasks = []
+        tasks: list[Any] = []
         for node_id in parallel_ids:
             parallel_node = workflow.get_node(node_id)
             if parallel_node:
                 tasks.append(self._execute_node(parallel_node, workflow, state))
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        return {"parallel_results": results}
+        return {"parallel_results": list(results)}
     
     def _get_next_node(
         self,
         node: WorkflowNode,
-        result: Any,
-        state: WorkflowState
-    ) -> Optional[str]:
+        result: NodeExecutionResult,
+        state: WorkflowState,
+    ) -> str | None:
         """确定下一个节点"""
+        del state
+
         if node.type == NodeType.END:
             return None
         

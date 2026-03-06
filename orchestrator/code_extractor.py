@@ -2,11 +2,13 @@
 代码提取器 - 从 LLM 输出中提取代码块并保存到文件系统
 """
 
-import re
-import os
 import logging
-from typing import Dict, List, Tuple, Optional
+import os
+import re
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+from ..shared import UnsafePathError, sanitize_relative_path
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,40 @@ class CodeExtractor:
         "wxml": "index.wxml",
         "wxss": "index.wxss",
     }
+
+    def _looks_like_filename(self, token: str) -> bool:
+        """判断 header token 是否更像文件名而非语言名。"""
+
+        if not token:
+            return False
+        if "/" in token or "\\" in token:
+            return True
+        if os.path.splitext(token)[1]:
+            return True
+        return token.lower() in {"dockerfile", "makefile"}
+
+    def _parse_block_header(self, header: str) -> tuple[str, Optional[str]]:
+        """解析代码块 header 中的语言和文件名。"""
+
+        normalized = header.strip()
+        if not normalized:
+            return "", None
+
+        for separator in (":", "："):
+            if separator in normalized:
+                lang_part, filename_part = normalized.split(separator, 1)
+                lang = lang_part.strip().lower()
+                filename = filename_part.strip() or None
+                return lang, filename
+
+        parts = normalized.split(maxsplit=1)
+        if len(parts) == 2:
+            return parts[0].strip().lower(), parts[1].strip() or None
+
+        token = parts[0].strip()
+        if self._looks_like_filename(token):
+            return "", token
+        return token.lower(), None
     
     def extract_code_blocks(self, text: str) -> List[CodeBlock]:
         """
@@ -92,13 +128,12 @@ class CodeExtractor:
         """
         blocks = []
         
-        # 模式1: 标准格式 ```language:filename 或 ```language filename
-        pattern = r'```[ \t]*([\w+-]+)?(?:[:：\s]([^\r\n`]+?))?[ \t]*\r?\n(.*?)```'
+        # 模式1: 捕获 header 整行，再解析语言/文件名，避免把首行代码误识别为文件名
+        pattern = r'```[ \t]*([^\r\n`]*)\r?\n(.*?)```'
         matches = re.findall(pattern, text, re.DOTALL)
         
-        for lang, filename, content in matches:
-            lang = lang.strip().lower() if lang else ""
-            filename = filename.strip() if filename else None
+        for header, content in matches:
+            lang, filename = self._parse_block_header(header)
             content = content.strip()
             
             # 跳过空代码块
@@ -113,6 +148,12 @@ class CodeExtractor:
                 if filename and not os.path.splitext(filename)[1] and '/' not in filename and '\\' not in filename:
                     # 可能是描述文字而非文件名，检查是否包含中文
                     if re.search(r'[\u4e00-\u9fff]', filename):
+                        filename = None
+                if filename:
+                    try:
+                        filename = sanitize_relative_path(filename)
+                    except UnsafePathError:
+                        logger.warning("忽略不安全文件名: %s", filename)
                         filename = None
 
             # 如果语言缺失但有文件名，尝试从扩展名推断
@@ -140,7 +181,7 @@ class CodeExtractor:
         # 例如: "<!-- index.html -->" 或 "// app.js" 或 "# main.py" 后跟代码块
         if blocks:
             lines = text.split('\n')
-            for i, block in enumerate(blocks):
+            for block in blocks:
                 if block.filename:
                     continue
                 # 在原文中找到这个代码块的位置
@@ -170,12 +211,20 @@ class CodeExtractor:
         files = {}
         
         # 计数器，用于处理多个同类型文件
-        counters = {}
+        counters: Dict[str, int] = {}
         
         for block in blocks:
             # 确定文件名
             if block.filename:
-                filename = block.filename
+                try:
+                    filename = sanitize_relative_path(block.filename)
+                except UnsafePathError:
+                    logger.warning("跳过不安全提取文件名: %s", block.filename)
+                    continue
+                if filename in files:
+                    counters[block.language] = counters.get(block.language, 1) + 1
+                    name, ext = os.path.splitext(filename)
+                    filename = f"{name}_{counters[block.language]}{ext}"
             else:
                 ext = self.LANG_TO_EXT.get(block.language, ".txt")
                 base = self.DEFAULT_FILENAMES.get(block.language, f"file{ext}")
@@ -253,22 +302,20 @@ class ProjectExporter:
         Returns:
             (success, message)
         """
-        export_dir = f"{self.base_export_path}/{project_name}"
-        
         try:
             # 在宝塔服务器上创建目录
             # 注意：这里需要通过 Docker exec 在宿主机上操作
             # 因为沙盒是独立的容器
             
             # 1. 先在沙盒中列出文件
-            list_result = await executor.execute(f"ls -la {sandbox_path}", event)
+            await executor.execute(f"ls -la {sandbox_path}", event)
             
             # 2. 打包文件
             tar_cmd = f"cd {sandbox_path} && tar -czf /tmp/project.tar.gz ."
             await executor.execute(tar_cmd, event)
             
             # 3. 返回打包文件路径
-            return True, f"项目已打包: /tmp/project.tar.gz"
+            return True, "项目已打包: /tmp/project.tar.gz"
             
         except Exception as e:
             logger.error(f"导出项目失败: {e}")
@@ -331,7 +378,7 @@ class CodeWriter:
                     # 即使 write_file 返回非预期结果，也尝试用 upload 直接写入
                     try:
                         sandbox = await self.executor.get_sandbox(event=event)
-                        sf = await sandbox.aupload(file_path, content)
+                        await sandbox.aupload(file_path, content)
                         created_files.append(file_path)
                         logger.info("✅ 文件通过 upload 备用方式写入: %s", file_path)
                     except Exception as upload_err:

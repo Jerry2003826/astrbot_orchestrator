@@ -105,5 +105,11 @@
     "type": "bool",
     "default": true,
     "hint": "自动拉取镜像或创建网络以修复沙盒启动失败"
+  },
+  "allow_local_fallback": {
+    "description": "沙盒失败时是否允许自动回退到本地执行",
+    "type": "bool",
+    "default": false,
+    "hint": "出于安全考虑默认关闭；开启后 shipyard 创建失败会自动改为本地执行"
   }
 }

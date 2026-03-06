@@ -11,14 +11,13 @@ LocalSandbox - 本地代码执行实现
 from __future__ import annotations
 
 import asyncio
-import base64
-import io
 import logging
 import os
 import re
-import tempfile
 import typing as t
+from pathlib import Path
 
+from ..shared import UnsafePathError, ensure_within_base
 from .base import CodeSandbox
 from .types import ExecChunk, ExecResult, SandboxFile
 
@@ -190,8 +189,8 @@ class LocalSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """上传文件到本地工作目录"""
-        full_path = os.path.join(self.cwd, remote_path)
-        dir_path = os.path.dirname(full_path)
+        full_path = ensure_within_base(self.cwd, remote_path)
+        dir_path = full_path.parent
         os.makedirs(dir_path, exist_ok=True)
 
         if isinstance(content, str):
@@ -211,7 +210,7 @@ class LocalSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """从本地工作目录下载文件"""
-        full_path = os.path.join(self.cwd, remote_path)
+        full_path = ensure_within_base(self.cwd, remote_path)
 
         if not os.path.exists(full_path):
             raise FileNotFoundError(f"文件不存在: {remote_path}")
@@ -230,7 +229,10 @@ class LocalSandbox(CodeSandbox):
         path: str = ".",
     ) -> t.List[SandboxFile]:
         """列出本地工作目录中的文件"""
-        target_dir = os.path.join(self.cwd, path)
+        try:
+            target_dir = Path(self.cwd) if path == "." else ensure_within_base(self.cwd, path)
+        except UnsafePathError:
+            return []
 
         if not os.path.isdir(target_dir):
             return []

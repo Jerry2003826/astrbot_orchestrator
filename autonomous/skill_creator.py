@@ -7,10 +7,12 @@ Skill 创建/管理工具
 - 管理 Skill 生命周期
 """
 
-import os
 import logging
-from typing import Dict, List, Any, Optional
+import os
 from pathlib import Path
+from typing import Any, cast
+
+from ..shared import slugify_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +24,11 @@ class SkillCreatorTool:
     通过 AstrBot 的 SkillManager 管理 Skills
     """
     
-    def __init__(self, context):
+    def __init__(self, context: Any) -> None:
         self.context = context
-        self._skill_manager = None
+        self._skill_manager: Any | None = None
     
-    def _get_skill_manager(self):
+    def _get_skill_manager(self) -> Any | None:
         """获取 AstrBot 的 SkillManager"""
         if self._skill_manager is None:
             try:
@@ -40,7 +42,7 @@ class SkillCreatorTool:
         """获取 Skills 存储路径"""
         try:
             from astrbot.core.utils.astrbot_path import get_astrbot_skills_path
-            return get_astrbot_skills_path()
+            return cast(str, get_astrbot_skills_path())
         except ImportError:
             # 备用路径
             return os.path.expanduser("~/.astrbot/data/skills")
@@ -78,18 +80,19 @@ class SkillCreatorTool:
             return "❌ Skill 管理器不可用"
         
         try:
+            safe_name = slugify_identifier(name, default="generated_skill")
             skills_path = self._get_skills_path()
-            skill_dir = Path(skills_path) / name
+            skill_dir = Path(skills_path) / safe_name
             
             skill_md = skill_dir / "SKILL.md"
             if not skill_md.exists():
                 skill_md = skill_dir / "skill.md"
             
             if not skill_md.exists():
-                return f"❌ Skill `{name}` 不存在"
+                return f"❌ Skill `{safe_name}` 不存在"
             
             content = skill_md.read_text(encoding="utf-8")
-            return f"📄 Skill: **{name}**\n\n```markdown\n{content}\n```"
+            return f"📄 Skill: **{safe_name}**\n\n```markdown\n{content}\n```"
             
         except Exception as e:
             return f"❌ 读取 Skill 失败: {str(e)}"
@@ -99,7 +102,7 @@ class SkillCreatorTool:
         name: str,
         description: str,
         content: str,
-        scripts: Optional[Dict[str, str]] = None
+        scripts: dict[str, str] | None = None,
     ) -> str:
         """
         创建新 Skill
@@ -114,12 +117,13 @@ class SkillCreatorTool:
             创建结果
         """
         try:
+            safe_name = slugify_identifier(name, default="generated_skill")
             skills_path = self._get_skills_path()
-            skill_dir = Path(skills_path) / name
+            skill_dir = Path(skills_path) / safe_name
             
             # 检查是否已存在
             if skill_dir.exists():
-                return f"❌ Skill `{name}` 已存在，请使用其他名称或先删除"
+                return f"❌ Skill `{safe_name}` 已存在，请使用其他名称或先删除"
             
             # 创建目录
             skill_dir.mkdir(parents=True, exist_ok=True)
@@ -148,9 +152,9 @@ description: {description}
             # 激活 Skill
             sm = self._get_skill_manager()
             if sm:
-                sm.set_skill_active(name, True)
+                sm.set_skill_active(safe_name, True)
             
-            return f"✅ Skill `{name}` 创建成功！\n\n📁 路径: {skill_dir}\n\n💡 Skill 已自动激活"
+            return f"✅ Skill `{safe_name}` 创建成功！\n\n📁 路径: {skill_dir}\n\n💡 Skill 已自动激活"
             
         except Exception as e:
             logger.error(f"创建 Skill 失败: {e}")
@@ -159,15 +163,16 @@ description: {description}
     async def edit_skill(self, name: str, new_content: str) -> str:
         """编辑 Skill 内容"""
         try:
+            safe_name = slugify_identifier(name, default="generated_skill")
             skills_path = self._get_skills_path()
-            skill_dir = Path(skills_path) / name
+            skill_dir = Path(skills_path) / safe_name
             
             skill_md = skill_dir / "SKILL.md"
             if not skill_md.exists():
                 skill_md = skill_dir / "skill.md"
             
             if not skill_md.exists():
-                return f"❌ Skill `{name}` 不存在"
+                return f"❌ Skill `{safe_name}` 不存在"
             
             # 备份原文件
             backup_path = skill_md.with_suffix(".md.bak")
@@ -176,7 +181,7 @@ description: {description}
             # 写入新内容
             skill_md.write_text(new_content, encoding="utf-8")
             
-            return f"✅ Skill `{name}` 已更新\n\n💡 原文件已备份为 {backup_path.name}"
+            return f"✅ Skill `{safe_name}` 已更新\n\n💡 原文件已备份为 {backup_path.name}"
             
         except Exception as e:
             return f"❌ 编辑失败: {str(e)}"
@@ -188,8 +193,9 @@ description: {description}
             return "❌ Skill 管理器不可用"
         
         try:
-            sm.delete_skill(name)
-            return f"✅ Skill `{name}` 已删除"
+            safe_name = slugify_identifier(name, default="generated_skill")
+            sm.delete_skill(safe_name)
+            return f"✅ Skill `{safe_name}` 已删除"
         except Exception as e:
             return f"❌ 删除失败: {str(e)}"
     
@@ -197,7 +203,7 @@ description: {description}
         self,
         name: str,
         user_description: str,
-        provider_id: str
+        provider_id: str,
     ) -> str:
         """
         根据用户描述自动生成 Skill
@@ -240,13 +246,18 @@ description: 简短的功能描述
                 system_prompt="你是一个专业的 AstrBot Skill 开发者。"
             )
             
-            content = response.completion_text
+            content = cast(str, response.completion_text)
             
             # 提取 Markdown 内容
             if "```markdown" in content:
                 content = content.split("```markdown")[1].split("```")[0]
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0]
+                if "\n" in content:
+                    first_line, remainder = content.split("\n", 1)
+                    normalized = first_line.strip().replace("-", "").replace("_", "")
+                    if first_line.strip() and normalized.isalnum():
+                        content = remainder
             
             return content.strip()
             

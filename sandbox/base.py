@@ -20,6 +20,7 @@ CodeSandbox 抽象基类
 
 from __future__ import annotations
 
+import json
 import logging
 import typing as t
 from abc import ABC, abstractmethod
@@ -198,12 +199,14 @@ class CodeSandbox(ABC):
         Returns:
             SandboxFile 下载后的文件对象
         """
+        safe_url = json.dumps(url)
+        safe_file_path = json.dumps(file_path)
         code = (
             "import httpx\n"
             "async with httpx.AsyncClient() as client:\n"
-            f"    async with client.stream('GET', '{url}') as response:\n"
+            f"    async with client.stream('GET', {safe_url}) as response:\n"
             "        response.raise_for_status()\n"
-            f"        with open('{file_path}', 'wb') as f:\n"
+            f"        with open({safe_file_path}, 'wb') as f:\n"
             "            async for chunk in response.aiter_bytes():\n"
             "                f.write(chunk)\n"
         )
@@ -292,12 +295,12 @@ class CodeSandbox(ABC):
         variables = {}
         try:
             packages = await self.alist_packages()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("列出沙盒包失败，使用空列表回退: %s", exc)
         try:
             variables = await self.ashow_variables()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("读取沙盒变量失败，使用空映射回退: %s", exc)
         return SandboxStatus(
             healthy=(health == "healthy"),
             mode=self.mode,

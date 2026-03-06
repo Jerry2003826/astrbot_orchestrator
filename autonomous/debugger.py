@@ -7,13 +7,12 @@
 - 提供修复建议
 """
 
-import os
-import sys
 import logging
+import sys
 import traceback
-from typing import Dict, List, Any, Optional
-from datetime import datetime
 from collections import deque
+from datetime import datetime
+from typing import Any, ClassVar, cast
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +25,13 @@ class SelfDebugger:
     """
     
     # 最近的错误记录
-    _error_history: deque = deque(maxlen=50)
+    _error_history: ClassVar[deque[dict[str, Any]]] = deque(maxlen=50)
     
-    def __init__(self, context):
+    def __init__(self, context: Any) -> None:
         self.context = context
     
     @classmethod
-    def record_error(cls, error: Exception, context: Dict = None):
+    def record_error(cls, error: Exception, context: dict[str, Any] | None = None) -> None:
         """记录错误"""
         cls._error_history.append({
             "time": datetime.now().isoformat(),
@@ -66,7 +65,7 @@ class SelfDebugger:
         self,
         error: Exception,
         traceback_info: str,
-        context: Dict = None
+        context: dict[str, Any] | None = None,
     ) -> str:
         """
         分析错误并提供修复建议
@@ -86,7 +85,7 @@ class SelfDebugger:
         error_message = str(error)
         
         # 基础分析
-        analysis = []
+        analysis: list[str] = []
         
         # 常见错误快速诊断
         if "ConnectionError" in error_type or "Timeout" in str(error):
@@ -127,7 +126,9 @@ class SelfDebugger:
         # 提取关键堆栈信息
         if traceback_info:
             tb_lines = traceback_info.strip().split("\n")
-            relevant_lines = [l for l in tb_lines if "astrbot" in l.lower() or "File" in l][-4:]
+            relevant_lines = [
+                line for line in tb_lines if "astrbot" in line.lower() or "File" in line
+            ][-4:]
             if relevant_lines:
                 analysis.append("\n📍 **错误位置:**")
                 for line in relevant_lines:
@@ -137,7 +138,7 @@ class SelfDebugger:
     
     async def get_system_status(self) -> str:
         """获取系统状态"""
-        lines = ["🖥️ **系统状态**\n"]
+        lines: list[str] = ["🖥️ **系统状态**\n"]
         
         # Python 版本
         lines.append(f"• Python: {sys.version.split()[0]}")
@@ -181,7 +182,7 @@ class SelfDebugger:
     async def analyze_problem(
         self,
         problem_description: str,
-        provider_id: str
+        provider_id: str,
     ) -> str:
         """
         分析用户描述的问题
@@ -215,7 +216,7 @@ class SelfDebugger:
                 system_prompt="你是一个 AstrBot 技术支持专家，擅长诊断和解决问题。"
             )
             
-            return response.completion_text
+            return cast(str, response.completion_text)
             
         except Exception as e:
             return f"❌ 分析失败: {str(e)}"
@@ -224,7 +225,7 @@ class SelfDebugger:
         self,
         error: Exception,
         code_context: str,
-        provider_id: str
+        provider_id: str,
     ) -> str:
         """
         为代码错误建议修复
@@ -254,7 +255,7 @@ class SelfDebugger:
                 system_prompt="你是一个 Python 调试专家。"
             )
             
-            return response.completion_text
+            return cast(str, response.completion_text)
             
         except Exception as e:
             return f"❌ 无法生成修复建议: {str(e)}"

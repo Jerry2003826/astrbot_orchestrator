@@ -8,14 +8,23 @@
 - 自主迭代改进
 """
 
-import json
 import logging
-import asyncio
-import re
 import os
-from typing import Dict, List, Any, Optional
+import re
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional, cast
+
+from ..runtime.graph_state import OrchestratorGraphState
+from ..runtime.pipeline import (
+    CallableOutputParser,
+    JsonOutputParser,
+    PromptModelParserPipeline,
+    PromptTemplate,
+    TextOutputParser,
+)
+from ..runtime.request_context import RequestContext
+from ..shared import UnsafePathError, ensure_within_base
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +120,333 @@ class DynamicOrchestrator:
         self.config = config or {}
         self.max_iterations = self.config.get("max_iterations", 10)
         self.subagent_settings = self._get_subagent_settings()
+        self.intent_pipeline = self._build_intent_pipeline()
+        self.plan_pipeline = self._build_plan_pipeline()
+        self.reasoning_pipeline = self._build_reasoning_pipeline()
         
         # 项目目录
         self.projects_dir = "/AstrBot/data/agent_projects"
+
+    async def _run_model_text(
+        self,
+        provider_id: str,
+        prompt: str,
+        system_prompt: str | None = None,
+    ) -> str:
+        """统一执行底层 LLM 调用并返回文本。"""
+
+        response = await self.context.llm_generate(
+            chat_provider_id=provider_id,
+            prompt=prompt,
+            system_prompt=system_prompt or "",
+        )
+        return str(response.completion_text)
+
+    def _build_intent_pipeline(self) -> PromptModelParserPipeline[Dict[str, Any]]:
+        """构建意图分析链。"""
+
+        prompt_template = PromptTemplate(
+            """分析用户请求，判断需要执行什么操作。
+
+用户请求：$request
+
+操作类型：
+1. search_plugin - 搜索插件
+2. install_plugin - 安装插件
+3. create_skill - 创建 Skill（简单描述）
+4. code_project - 创建代码项目（需要写真正的代码）
+5. web_app - 创建网页应用（HTML/CSS/JS/后端）
+6. execute_code - 执行代码
+7. debug - 调试问题
+8. reasoning - 普通问答
+
+判断规则：
+- 如果用户想要"程序"、"小程序"、"应用"、"网页"、"API"、"服务"等，选择 code_project 或 web_app
+- 如果涉及多个文件、数据库、前后端，选择 web_app 并设置 needs_planning=true
+- 如果只是简单的单文件脚本，选择 code_project
+
+输出 JSON：
+{
+    "intent": "操作类型",
+    "needs_planning": true,
+    "complexity": "simple/medium/complex",
+    "params": {
+        "project_name": "项目名称",
+        "tech_stack": ["python", "flask", "html"],
+        "features": ["功能1", "功能2"],
+        "other_params": "..."
+    },
+    "needs_admin": false,
+    "description": "简短描述"
+}
+
+只输出 JSON。"""
+        )
+        return PromptModelParserPipeline(
+            prompt_template=prompt_template,
+            model_runner=self._run_model_text,
+            output_parser=CallableOutputParser(self._parse_intent_payload),
+            system_prompt="你是一个项目需求分析专家。只输出 JSON。",
+        )
+
+    def _build_plan_pipeline(self) -> PromptModelParserPipeline[List[ExecutionStep]]:
+        """构建执行计划生成链。"""
+
+        prompt_template = PromptTemplate(
+            """你是一个高级程序员，需要规划一个项目的实现步骤。
+
+项目需求：$request
+项目名称：$project_name
+技术栈：$tech_stack
+功能点：$features
+
+请输出详细的执行计划，每个步骤都要包含完整的代码。
+
+输出 JSON 数组：
+[
+    {
+        "step": 1,
+        "action": "create_file",
+        "description": "创建主程序文件",
+        "file_path": "$project_name/main.py",
+        "code": "完整的 Python 代码..."
+    },
+    {
+        "step": 2,
+        "action": "create_file",
+        "description": "创建配置文件",
+        "file_path": "$project_name/config.py",
+        "code": "完整代码..."
+    },
+    {
+        "step": 3,
+        "action": "execute",
+        "description": "安装依赖",
+        "code": "pip install flask requests"
+    },
+    {
+        "step": 4,
+        "action": "execute",
+        "description": "启动服务",
+        "code": "cd $project_name && python main.py"
+    }
+]
+
+要求：
+1. 代码必须完整可运行，不要用省略号或注释代替代码
+2. 包含所有必要的 import
+3. 包含错误处理
+4. 如果是 Web 应用，要包含启动服务的步骤
+5. 文件路径使用相对路径
+
+只输出 JSON 数组。"""
+        )
+        return PromptModelParserPipeline(
+            prompt_template=prompt_template,
+            model_runner=self._run_model_text,
+            output_parser=CallableOutputParser(self._parse_execution_plan),
+            system_prompt="你是一个资深全栈工程师。输出完整可运行的代码，不要省略任何部分。只输出 JSON。",
+        )
+
+    def _build_reasoning_pipeline(self) -> PromptModelParserPipeline[str]:
+        """构建普通问答链。"""
+
+        prompt_template = PromptTemplate("$request")
+        return PromptModelParserPipeline(
+            prompt_template=prompt_template,
+            model_runner=self._run_model_text,
+            output_parser=TextOutputParser(),
+            system_prompt="""你是一个全能的智能助手，拥有以下能力：
+- 搜索和安装 AstrBot 插件
+- 创建代码项目和网页应用
+- 执行代码（本地/沙盒）
+- 诊断和调试问题
+
+如果用户想要创建程序/应用，引导他们使用 /agent 命令。""",
+        )
+
+    def _parse_intent_payload(self, text: str) -> Dict[str, Any]:
+        """解析意图分析输出。"""
+
+        payload = JsonOutputParser[Dict[str, Any]]().parse(text)
+        if not isinstance(payload, dict):
+            raise ValueError("意图分析结果必须是 JSON 对象")
+        return payload
+
+    def _parse_execution_plan(self, text: str) -> List[ExecutionStep]:
+        """解析执行计划输出。"""
+
+        plan_data = JsonOutputParser[List[Dict[str, Any]] | List[Any]]().parse(text)
+        if not isinstance(plan_data, list):
+            raise ValueError("执行计划必须是 JSON 数组")
+
+        steps: List[ExecutionStep] = []
+        for item in plan_data:
+            if not isinstance(item, dict):
+                raise ValueError("执行计划中的每个步骤都必须是 JSON 对象")
+            steps.append(
+                ExecutionStep(
+                    step_num=item.get("step", len(steps) + 1),
+                    action=item.get("action", "create_file"),
+                    description=item.get("description", ""),
+                    code=item.get("code"),
+                    file_path=item.get("file_path"),
+                )
+            )
+        return steps
+
+    async def _intent_node(self, state: OrchestratorGraphState) -> None:
+        """图节点：分析用户意图。"""
+
+        self._log_state_step(state, "🧠 正在分析用户意图...")
+        state.intent = await self._analyze_intent_enhanced(
+            state.request_text,
+            state.provider_id,
+        )
+        self._log_state_step(
+            state,
+            f"💡 识别意图: {state.intent.get('intent')} - {state.intent.get('description', '')}",
+        )
+
+    async def _subagent_node(self, state: OrchestratorGraphState) -> bool:
+        """图节点：如有需要，委托给 SubAgent 编排器。"""
+
+        logger.info("SubAgent 设置: %s", self.subagent_settings)
+        should_use = self._should_use_subagents(state.intent, state.request_text)
+        logger.info("_should_use_subagents 返回: %s (intent=%s)", should_use, state.intent.get("intent"))
+
+        if not should_use:
+            return False
+        if not self.meta_orchestrator or not state.event:
+            self._log_state_step(state, "⚠️ 未找到 SubAgent 编排器，回退到单 Agent 模式")
+            return False
+
+        self._log_state_step(state, "🤖 启用动态 SubAgent 编排...")
+        state.result = await self.meta_orchestrator.process(
+            user_request=state.request_text,
+            provider_id=state.provider_id,
+            event=state.event,
+            is_admin=state.is_admin,
+        )
+        state.used_subagents = True
+        self._log_state_step(state, "✅ SubAgent 编排完成")
+        return True
+
+    async def _plan_node(self, state: OrchestratorGraphState) -> None:
+        """图节点：生成执行计划。"""
+
+        self._log_state_step(state, "📋 任务复杂，生成执行计划...")
+        state.plan = await self._generate_execution_plan(
+            state.request_text,
+            state.intent,
+            state.provider_id,
+        )
+        self._log_state_step(state, f"📋 计划包含 {len(state.plan)} 个步骤")
+
+    async def _plan_execution_node(self, state: OrchestratorGraphState) -> None:
+        """图节点：执行计划。"""
+
+        state.result = await self._execute_plan(
+            plan=state.plan,
+            user_request=state.request_text,
+            provider_id=state.provider_id,
+            is_admin=state.is_admin,
+            event=state.event,
+            log_step=lambda step: self._log_state_step(state, step),
+        )
+
+    async def _action_node(self, state: OrchestratorGraphState) -> None:
+        """图节点：执行直接动作。"""
+
+        self._log_state_step(state, f"⚙️ 开始执行: {state.intent.get('intent')}")
+        state.result = await self._execute_by_intent(
+            intent=state.intent,
+            user_request=state.request_text,
+            provider_id=state.provider_id,
+            is_admin=state.is_admin,
+            event=state.event,
+        )
+
+    def _finalize_state_result(self, state: OrchestratorGraphState) -> Dict[str, Any]:
+        """将状态对象转换为最终响应。"""
+
+        result = state.result or {"status": "error", "answer": "❌ 未生成结果"}
+        show_process = self.config.get("show_thinking_process", True)
+        if show_process and state.thinking_steps:
+            process_text = "\n".join([f"  {step}" for step in state.thinking_steps])
+            result["answer"] = (
+                f"🤖 **思考过程:**\n{process_text}\n\n---\n\n{result.get('answer', '')}"
+            )
+            result["thinking_steps"] = list(state.thinking_steps)
+        return result
+
+    async def _build_error_result(
+        self,
+        state: OrchestratorGraphState,
+        error: Exception,
+    ) -> Dict[str, Any]:
+        """构建统一错误响应。"""
+
+        logger.error("[自主Agent] 执行失败: %s", error, exc_info=True)
+        state.error = str(error)
+
+        if self.debugger:
+            try:
+                import traceback
+
+                analysis = await self.debugger.analyze_error(
+                    error=error,
+                    traceback_info=traceback.format_exc(),
+                    context={
+                        "request": state.request_text,
+                        "request_id": state.request_id,
+                    },
+                )
+                return {
+                    "status": "error",
+                    "answer": f"❌ 执行出错: {str(error)}\n\n🔍 **自动诊断:**\n{analysis}",
+                    "error": str(error),
+                }
+            except Exception:
+                pass
+
+        return {
+            "status": "error",
+            "answer": f"❌ 执行出错: {str(error)}",
+            "error": str(error),
+        }
+
+    def _log_state_step(self, state: OrchestratorGraphState, step: str) -> None:
+        """记录状态轨迹。"""
+
+        state.add_step(step)
+        logger.info("[自主Agent][%s] %s", state.request_id, step)
+
+    async def process_request(self, request_context: RequestContext) -> Dict[str, Any]:
+        """使用新的请求上下文原语处理用户请求。"""
+
+        configured_provider = self.config.get("llm_provider")
+        if configured_provider:
+            request_context = request_context.with_provider(str(configured_provider))
+        state = OrchestratorGraphState(request_context=request_context)
+        self._log_state_step(state, f"📥 收到请求: {state.request_text[:50]}...")
+
+        try:
+            await self._intent_node(state)
+            if await self._subagent_node(state):
+                return self._finalize_state_result(state)
+
+            if state.intent.get("needs_planning", False):
+                await self._plan_node(state)
+                await self._plan_execution_node(state)
+            else:
+                await self._action_node(state)
+
+            self._log_state_step(state, "✅ 执行完成")
+            return self._finalize_state_result(state)
+
+        except Exception as error:
+            return await self._build_error_result(state, error)
     
     async def process_autonomous(
         self,
@@ -122,110 +455,12 @@ class DynamicOrchestrator:
         context: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """全自主处理用户请求"""
-        context = context or {}
-        is_admin = context.get("is_admin", False)
-        event = context.get("event")
-        show_process = self.config.get("show_thinking_process", True)
-        
-        configured_provider = self.config.get("llm_provider")
-        if configured_provider:
-            provider_id = configured_provider
-        
-        thinking_steps = []
-        
-        def log_step(step: str):
-            thinking_steps.append(step)
-            logger.info(f"[自主Agent] {step}")
-        
-        log_step(f"📥 收到请求: {user_request[:50]}...")
-        
-        try:
-            log_step("🧠 正在分析用户意图...")
-            intent = await self._analyze_intent_enhanced(user_request, provider_id)
-            log_step(f"💡 识别意图: {intent.get('intent')} - {intent.get('description', '')}")
-
-            # 调试：检查 SubAgent 设置
-            logger.info("SubAgent 设置: %s", self.subagent_settings)
-            should_use = self._should_use_subagents(intent, user_request)
-            logger.info("_should_use_subagents 返回: %s (intent=%s)", should_use, intent.get("intent"))
-            
-            if should_use:
-                if self.meta_orchestrator and event:
-                    log_step("🤖 启用动态 SubAgent 编排...")
-                    result = await self.meta_orchestrator.process(
-                        user_request=user_request,
-                        provider_id=provider_id,
-                        event=event,
-                        is_admin=is_admin,
-                    )
-                    log_step("✅ SubAgent 编排完成")
-                    if show_process and thinking_steps:
-                        process_text = "\n".join([f"  {s}" for s in thinking_steps])
-                        result["answer"] = (
-                            f"🤖 **思考过程:**\n{process_text}\n\n---\n\n"
-                            f"{result.get('answer', '')}"
-                        )
-                        result["thinking_steps"] = thinking_steps
-                    return result
-                log_step("⚠️ 未找到 SubAgent 编排器，回退到单 Agent 模式")
-            
-            # 检查是否需要多步骤执行
-            if intent.get("needs_planning", False):
-                log_step("📋 任务复杂，生成执行计划...")
-                plan = await self._generate_execution_plan(user_request, intent, provider_id)
-                log_step(f"📋 计划包含 {len(plan)} 个步骤")
-                
-                result = await self._execute_plan(
-                    plan=plan,
-                    user_request=user_request,
-                    provider_id=provider_id,
-                    is_admin=is_admin,
-                    event=event,
-                    log_step=log_step
-                )
-            else:
-                log_step(f"⚙️ 开始执行: {intent.get('intent')}")
-                result = await self._execute_by_intent(
-                    intent=intent,
-                    user_request=user_request,
-                    provider_id=provider_id,
-                    is_admin=is_admin,
-                    event=event
-                )
-            
-            log_step("✅ 执行完成")
-            
-            if show_process and thinking_steps:
-                process_text = "\n".join([f"  {s}" for s in thinking_steps])
-                result["answer"] = f"🤖 **思考过程:**\n{process_text}\n\n---\n\n{result.get('answer', '')}"
-                result["thinking_steps"] = thinking_steps
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"[自主Agent] 执行失败: {e}", exc_info=True)
-            
-            if self.debugger:
-                try:
-                    import traceback
-                    analysis = await self.debugger.analyze_error(
-                        error=e,
-                        traceback_info=traceback.format_exc(),
-                        context={"request": user_request}
-                    )
-                    return {
-                        "status": "error",
-                        "answer": f"❌ 执行出错: {str(e)}\n\n🔍 **自动诊断:**\n{analysis}",
-                        "error": str(e)
-                    }
-                except Exception:
-                    pass
-            
-            return {
-                "status": "error",
-                "answer": f"❌ 执行出错: {str(e)}",
-                "error": str(e)
-            }
+        request_context = RequestContext.from_legacy(
+            user_request=user_request,
+            provider_id=provider_id,
+            context=context,
+        )
+        return await self.process_request(request_context)
 
     def _get_subagent_settings(self) -> Dict[str, Any]:
         settings = self.config.get("subagent_settings")
@@ -259,58 +494,14 @@ class DynamicOrchestrator:
     
     async def _analyze_intent_enhanced(self, request: str, provider_id: str) -> Dict[str, Any]:
         """增强版意图分析 - 识别复杂项目需求"""
-        
-        prompt = f"""分析用户请求，判断需要执行什么操作。
-
-用户请求：{request}
-
-操作类型：
-1. search_plugin - 搜索插件
-2. install_plugin - 安装插件
-3. create_skill - 创建 Skill（简单描述）
-4. code_project - 创建代码项目（需要写真正的代码）
-5. web_app - 创建网页应用（HTML/CSS/JS/后端）
-6. execute_code - 执行代码
-7. debug - 调试问题
-8. reasoning - 普通问答
-
-判断规则：
-- 如果用户想要"程序"、"小程序"、"应用"、"网页"、"API"、"服务"等，选择 code_project 或 web_app
-- 如果涉及多个文件、数据库、前后端，选择 web_app 并设置 needs_planning=true
-- 如果只是简单的单文件脚本，选择 code_project
-
-输出 JSON：
-{{
-    "intent": "操作类型",
-    "needs_planning": true/false,  // 是否需要多步骤规划
-    "complexity": "simple/medium/complex",
-    "params": {{
-        "project_name": "项目名称",
-        "tech_stack": ["python", "flask", "html"],  // 技术栈
-        "features": ["功能1", "功能2"],
-        "other_params": "..."
-    }},
-    "needs_admin": true/false,
-    "description": "简短描述"
-}}
-
-只输出 JSON。"""
-
         try:
-            response = await self.context.llm_generate(
-                chat_provider_id=provider_id,
-                prompt=prompt,
-                system_prompt="你是一个项目需求分析专家。只输出 JSON。"
+            return cast(
+                Dict[str, Any],
+                await self.intent_pipeline.ainvoke(
+                    provider_id=provider_id,
+                    variables={"request": request},
+                ),
             )
-            
-            text = response.completion_text
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0]
-            elif "```" in text:
-                text = text.split("```")[1].split("```")[0]
-            
-            return json.loads(text.strip())
-            
         except Exception as e:
             logger.warning(f"意图分析失败: {e}")
             return {
@@ -328,87 +519,25 @@ class DynamicOrchestrator:
         provider_id: str
     ) -> List[ExecutionStep]:
         """生成多步骤执行计划"""
-        
+
         params = intent.get("params", {})
         project_name = params.get("project_name", "my_project")
         tech_stack = params.get("tech_stack", ["python"])
         features = params.get("features", [])
-        
-        prompt = f"""你是一个高级程序员，需要规划一个项目的实现步骤。
-
-项目需求：{request}
-项目名称：{project_name}
-技术栈：{', '.join(tech_stack)}
-功能点：{', '.join(features) if features else '根据需求自动识别'}
-
-请输出详细的执行计划，每个步骤都要包含完整的代码。
-
-输出 JSON 数组：
-[
-    {{
-        "step": 1,
-        "action": "create_file",
-        "description": "创建主程序文件",
-        "file_path": "{project_name}/main.py",
-        "code": "完整的 Python 代码..."
-    }},
-    {{
-        "step": 2,
-        "action": "create_file",
-        "description": "创建配置文件",
-        "file_path": "{project_name}/config.py",
-        "code": "完整代码..."
-    }},
-    {{
-        "step": 3,
-        "action": "execute",
-        "description": "安装依赖",
-        "code": "pip install flask requests"
-    }},
-    {{
-        "step": 4,
-        "action": "execute",
-        "description": "启动服务",
-        "code": "cd {project_name} && python main.py"
-    }}
-]
-
-要求：
-1. 代码必须完整可运行，不要用省略号或注释代替代码
-2. 包含所有必要的 import
-3. 包含错误处理
-4. 如果是 Web 应用，要包含启动服务的步骤
-5. 文件路径使用相对路径
-
-只输出 JSON 数组。"""
 
         try:
-            response = await self.context.llm_generate(
-                chat_provider_id=provider_id,
-                prompt=prompt,
-                system_prompt="你是一个资深全栈工程师。输出完整可运行的代码，不要省略任何部分。只输出 JSON。"
+            return cast(
+                List[ExecutionStep],
+                await self.plan_pipeline.ainvoke(
+                    provider_id=provider_id,
+                    variables={
+                        "request": request,
+                        "project_name": project_name,
+                        "tech_stack": ", ".join(tech_stack),
+                        "features": ", ".join(features) if features else "根据需求自动识别",
+                    },
+                ),
             )
-            
-            text = response.completion_text
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0]
-            elif "```" in text:
-                text = text.split("```")[1].split("```")[0]
-            
-            plan_data = json.loads(text.strip())
-            
-            steps = []
-            for item in plan_data:
-                steps.append(ExecutionStep(
-                    step_num=item.get("step", len(steps) + 1),
-                    action=item.get("action", "create_file"),
-                    description=item.get("description", ""),
-                    code=item.get("code"),
-                    file_path=item.get("file_path")
-                ))
-            
-            return steps
-            
         except Exception as e:
             logger.error(f"生成执行计划失败: {e}")
             return [ExecutionStep(
@@ -436,25 +565,33 @@ class DynamicOrchestrator:
             
             try:
                 if step.action == "create_file":
-                    result = await self._execute_create_file(step, event)
+                    result = await self._execute_create_file(step, event, is_admin=is_admin)
                     if project_path is None and step.file_path:
                         project_path = step.file_path.split("/")[0]
-                        
+                    step.status = "completed" if result.startswith("✅") else "skipped"
+
                 elif step.action == "execute":
                     if not is_admin:
                         result = "⚠️ 跳过（需要管理员权限）"
+                        step.status = "skipped"
+                    elif not step.code:
+                        result = "❌ 缺少执行命令"
+                        step.status = "failed"
                     else:
                         result = await self._execute_command(step.code, event)
-                        
+                        step.status = "completed" if not result.startswith("❌") else "failed"
+
                 elif step.action == "error":
                     result = f"❌ {step.description}"
-                    
+                    step.status = "failed"
+
                 else:
                     result = f"未知操作: {step.action}"
-                
+                    step.status = "failed"
+
                 step.result = result
-                step.status = "completed"
-                results.append(f"✅ 步骤 {step.step_num}: {step.description}")
+                status_icon = "✅" if step.status == "completed" else "⚠️" if step.status == "skipped" else "❌"
+                results.append(f"{status_icon} 步骤 {step.step_num}: {step.description}")
                 
             except Exception as e:
                 step.status = "failed"
@@ -463,7 +600,7 @@ class DynamicOrchestrator:
                 
                 # 尝试自动修复
                 if self.debugger and is_admin:
-                    log_step(f"🔧 尝试自动修复...")
+                    log_step("🔧 尝试自动修复...")
                     try:
                         fix = await self._auto_fix_error(e, step, provider_id)
                         if fix:
@@ -479,41 +616,28 @@ class DynamicOrchestrator:
         
         return {"status": "success", "answer": output, "project_path": project_path}
     
-    async def _execute_create_file(self, step: ExecutionStep, event) -> str:
+    async def _execute_create_file(self, step: ExecutionStep, event, is_admin: bool) -> str:
         """执行文件创建"""
+        if not is_admin:
+            return "⚠️ 跳过（需要管理员权限）"
         if not step.file_path or not step.code:
             return "❌ 缺少文件路径或代码"
-        
-        # 确保目录存在
-        full_path = os.path.join(self.projects_dir, step.file_path)
-        dir_path = os.path.dirname(full_path)
-        
-        # 创建目录命令
-        mkdir_cmd = f"mkdir -p {dir_path}"
-        
-        # 写入文件命令 - 使用 cat 和 heredoc
-        # 转义特殊字符
-        escaped_code = step.code.replace("\\", "\\\\").replace("$", "\\$").replace("`", "\\`")
-        write_cmd = f"""cat > {full_path} << 'ENDOFFILE'
-{step.code}
-ENDOFFILE"""
-        
-        if self.executor:
-            try:
-                # 创建目录
-                await self.executor.execute(mkdir_cmd, event)
-                # 写入文件
-                result = await self.executor.execute(write_cmd, event)
-                return f"✅ 已创建 `{step.file_path}`\n📂 绝对路径: `{full_path}`"
-            except Exception as e:
-                return f"❌ 创建文件失败: {str(e)}"
-        
-        return "❌ 执行器不可用"
+
+        try:
+            full_path = ensure_within_base(self.projects_dir, step.file_path)
+            os.makedirs(full_path.parent, exist_ok=True)
+            with open(full_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write(step.code)
+            return f"✅ 已创建 `{step.file_path}`\n📂 绝对路径: `{full_path}`"
+        except UnsafePathError as e:
+            return f"❌ 创建文件失败: {str(e)}"
+        except Exception as e:
+            return f"❌ 创建文件失败: {str(e)}"
     
     async def _execute_command(self, code: str, event) -> str:
         """执行命令"""
         if self.executor:
-            return await self.executor.execute(code, event)
+            return cast(str, await self.executor.execute(code, event))
         return "❌ 执行器不可用"
     
     async def _auto_fix_error(
@@ -532,7 +656,7 @@ ENDOFFILE"""
             context={"step": step.description, "code": step.code}
         )
         
-        return analysis
+        return cast(Optional[str], analysis)
     
     async def _generate_summary(
         self,
@@ -601,7 +725,7 @@ ENDOFFILE"""
             return await self._handle_install_plugin(params, user_request, provider_id, is_admin)
         
         elif intent_type == "create_skill":
-            return await self._handle_create_skill(params, user_request, provider_id)
+            return await self._handle_create_skill(params, user_request, provider_id, is_admin)
         
         elif intent_type in ["code_project", "web_app"]:
             # 对于代码项目，生成计划并执行
@@ -656,8 +780,10 @@ ENDOFFILE"""
         
         return {"status": "error", "answer": "❌ 插件管理工具不可用"}
     
-    async def _handle_create_skill(self, params: Dict, request: str, provider_id: str) -> Dict[str, Any]:
+    async def _handle_create_skill(self, params: Dict, request: str, provider_id: str, is_admin: bool) -> Dict[str, Any]:
         """处理 Skill 创建"""
+        if not is_admin:
+            return {"status": "error", "answer": "❌ 只有管理员可以创建 Skill"}
         skill_name = params.get("name", "") or self._extract_skill_name(request) or "my_skill"
         description = params.get("description", request)
         
@@ -706,22 +832,12 @@ ENDOFFILE"""
     
     async def _handle_reasoning(self, request: str, provider_id: str) -> Dict[str, Any]:
         """处理普通推理请求"""
-        
-        system_prompt = """你是一个全能的智能助手，拥有以下能力：
-- 搜索和安装 AstrBot 插件
-- 创建代码项目和网页应用
-- 执行代码（本地/沙盒）
-- 诊断和调试问题
 
-如果用户想要创建程序/应用，引导他们使用 /agent 命令。"""
-
-        response = await self.context.llm_generate(
-            chat_provider_id=provider_id,
-            prompt=request,
-            system_prompt=system_prompt
+        answer = await self.reasoning_pipeline.ainvoke(
+            provider_id=provider_id,
+            variables={"request": request},
         )
-        
-        return {"status": "success", "answer": response.completion_text}
+        return {"status": "success", "answer": answer}
     
     def _extract_keyword(self, text: str, exclude: List[str]) -> str:
         words = text.replace("，", " ").replace(",", " ").split()
@@ -733,18 +849,18 @@ ENDOFFILE"""
     def _extract_skill_name(self, text: str) -> str:
         matches = re.findall(r'["\']([^"\']+)["\']', text)
         if matches:
-            return matches[0].replace(" ", "_").lower()
+            return str(matches[0]).replace(" ", "_").lower()
         return ""
     
     def _extract_code(self, text: str) -> str:
         if "```" in text:
             matches = re.findall(r'```(?:\w+)?\n?(.*?)```', text, re.DOTALL)
             if matches:
-                return matches[0].strip()
+                return str(matches[0]).strip()
         if "`" in text:
             matches = re.findall(r'`([^`]+)`', text)
             if matches:
-                return matches[0].strip()
+                return str(matches[0]).strip()
         return ""
     
     async def process(self, user_request: str, provider_id: str, context: Optional[Dict] = None) -> Dict[str, Any]:

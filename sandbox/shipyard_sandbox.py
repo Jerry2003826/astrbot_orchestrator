@@ -13,9 +13,10 @@ import asyncio
 import base64
 import json
 import logging
-import os
+import shlex
 import typing as t
 
+from ..shared import ensure_within_base, quote_shell_path
 from .base import CodeSandbox
 from .types import ExecChunk, ExecResult, SandboxFile
 
@@ -58,9 +59,9 @@ class ShipyardSandbox(CodeSandbox):
             umo = self._event.unified_msg_origin if self._event else None
             self._booter = await get_booter(self._context, umo)
             return self._booter
-        except ImportError:
+        except ImportError as exc:
             logger.error("[ShipyardSandbox] 无法导入 computer_client")
-            raise RuntimeError("AstrBot computer_client 不可用")
+            raise RuntimeError("AstrBot computer_client 不可用") from exc
         except Exception as e:
             logger.error("[ShipyardSandbox] 获取 booter 失败: %s", e)
             raise
@@ -69,7 +70,7 @@ class ShipyardSandbox(CodeSandbox):
         """启动 Shipyard 沙盒"""
         await self._get_booter()
         # 确保工作目录存在
-        await self._shell_exec(f"mkdir -p {self.cwd}")
+        await self._shell_exec(f"mkdir -p {quote_shell_path(self.cwd)}")
         self._started = True
         logger.info("[ShipyardSandbox] 已启动")
 
@@ -79,7 +80,11 @@ class ShipyardSandbox(CodeSandbox):
         self._started = False
         logger.info("[ShipyardSandbox] 已停止")
 
-    async def _shell_exec(self, command: str, timeout: t.Optional[float] = None) -> dict:
+    async def _shell_exec(
+        self,
+        command: str,
+        timeout: t.Optional[float] = None,
+    ) -> dict[str, t.Any]:
         """通过 booter 执行 shell 命令
         
         Args:
@@ -95,10 +100,14 @@ class ShipyardSandbox(CodeSandbox):
             result = await booter.shell.exec(command)
         if isinstance(result, str):
             try:
-                return json.loads(result)
+                return t.cast(dict[str, t.Any], json.loads(result))
             except (json.JSONDecodeError, TypeError):
                 return {"stdout": result, "stderr": "", "exit_code": 0}
-        return result if isinstance(result, dict) else {"stdout": str(result), "stderr": "", "exit_code": 0}
+        return (
+            t.cast(dict[str, t.Any], result)
+            if isinstance(result, dict)
+            else {"stdout": str(result), "stderr": "", "exit_code": 0}
+        )
 
     # ── 代码执行 ──────────────────────────────────────────
 
@@ -112,16 +121,17 @@ class ShipyardSandbox(CodeSandbox):
         """通过 Shipyard 执行代码"""
         timeout = timeout or self.timeout
         work_dir = cwd or self.cwd
+        quoted_work_dir = quote_shell_path(work_dir)
 
         try:
             if kernel == "bash":
-                command = f"cd {work_dir} && {code}"
+                command = f"cd {quoted_work_dir} && {code}"
             else:
                 # Python 代码：写入临时文件执行
                 # 转义单引号
                 escaped = code.replace("'", "'\\''")
                 command = (
-                    f"cd {work_dir} && python3 -c '{escaped}'"
+                    f"cd {quoted_work_dir} && python3 -c '{escaped}'"
                 )
 
             result = await asyncio.wait_for(
@@ -201,27 +211,21 @@ class ShipyardSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """上传文件到 Shipyard 沙盒"""
-        full_path = f"{self.cwd}/{remote_path}"
+        full_path = ensure_within_base(self.cwd, remote_path)
+        quoted_path = quote_shell_path(full_path)
 
         # 确保目录存在
-        dir_path = os.path.dirname(full_path)
-        await self._shell_exec(f"mkdir -p {dir_path}")
+        dir_path = full_path.parent
+        await self._shell_exec(f"mkdir -p {quote_shell_path(dir_path)}")
 
-        if isinstance(content, str):
-            # 文本文件：使用 heredoc
-            # 转义特殊字符
-            await self._shell_exec(
-                f"cat > {full_path} << 'SANDBOX_EOF'\n{content}\nSANDBOX_EOF"
-            )
-        else:
-            # 二进制文件：base64 编码传输
-            b64 = base64.b64encode(content).decode("ascii")
-            await self._shell_exec(
-                f"echo '{b64}' | base64 -d > {full_path}"
-            )
+        payload = content.encode("utf-8") if isinstance(content, str) else content
+        b64 = base64.b64encode(payload).decode("ascii")
+        await self._shell_exec(
+            f"printf %s {shlex.quote(b64)} | base64 -d > {quoted_path}"
+        )
 
         # 获取文件大小
-        size_result = await self._shell_exec(f"stat -c %s {full_path} 2>/dev/null || echo -1")
+        size_result = await self._shell_exec(f"stat -c %s {quoted_path} 2>/dev/null || echo -1")
         try:
             size = int(size_result.get("stdout", "-1").strip())
         except (ValueError, AttributeError):
@@ -236,22 +240,23 @@ class ShipyardSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """从 Shipyard 沙盒下载文件"""
-        full_path = f"{self.cwd}/{remote_path}"
+        full_path = ensure_within_base(self.cwd, remote_path)
+        quoted_path = quote_shell_path(full_path)
 
         # 检查文件是否存在
-        check = await self._shell_exec(f"test -f {full_path} && echo exists || echo missing")
+        check = await self._shell_exec(f"test -f {quoted_path} && echo exists || echo missing")
         if "missing" in check.get("stdout", ""):
             raise FileNotFoundError(f"文件不存在: {remote_path}")
 
         # 使用 base64 编码读取（支持二进制）
-        result = await self._shell_exec(f"base64 {full_path}")
+        result = await self._shell_exec(f"base64 {quoted_path}")
         b64_content = result.get("stdout", "").strip()
 
         try:
             content = base64.b64decode(b64_content)
         except Exception:
             # 回退到文本读取
-            text_result = await self._shell_exec(f"cat {full_path}")
+            text_result = await self._shell_exec(f"cat {quoted_path}")
             content = text_result.get("stdout", "").encode("utf-8")
 
         return SandboxFile(
@@ -265,10 +270,11 @@ class ShipyardSandbox(CodeSandbox):
         path: str = ".",
     ) -> t.List[SandboxFile]:
         """列出 Shipyard 沙盒中的文件"""
-        target_dir = f"{self.cwd}/{path}" if path != "." else self.cwd
+        target_dir = self.cwd if path == "." else ensure_within_base(self.cwd, path)
+        quoted_dir = quote_shell_path(target_dir)
 
         result = await self._shell_exec(
-            f"find {target_dir} -maxdepth 1 -type f "
+            f"find {quoted_dir} -maxdepth 1 -type f "
             f"-exec du -h {{}} + 2>/dev/null | awk '{{print $2, $1}}' | sort"
         )
 

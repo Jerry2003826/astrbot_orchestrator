@@ -40,3 +40,10 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test / coverage
+.coverage
+htmlcov/
+
+# Build / runtime artifacts
+artifacts/

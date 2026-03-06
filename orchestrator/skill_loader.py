@@ -4,9 +4,11 @@ AstrBot Skill 加载器
 读取 AstrBot 原生的 Skill 系统（基于 SKILL.md）
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Dict, List, Any, Optional
 from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,7 @@ class AstrBotSkillLoader:
     通过 AstrBot 的 SkillManager 读取已注册的 Skills
     """
     
-    def __init__(self, context):
+    def __init__(self, context: Any) -> None:
         """
         初始化
         
@@ -26,11 +28,11 @@ class AstrBotSkillLoader:
             context: AstrBot Context 对象
         """
         self.context = context
-        self._skill_manager = None
-        self._skills_cache: List[Dict] = []
+        self._skill_manager: Any | None = None
+        self._skills_cache: list[dict[str, Any]] = []
         self._cache_valid = False
     
-    def _get_skill_manager(self):
+    def _get_skill_manager(self) -> Any | None:
         """获取 AstrBot 的 SkillManager"""
         if self._skill_manager is None:
             try:
@@ -40,7 +42,7 @@ class AstrBotSkillLoader:
                 logger.warning("无法导入 SkillManager，Skill 功能不可用")
         return self._skill_manager
     
-    def list_skills(self, active_only: bool = True) -> List[Dict[str, Any]]:
+    def list_skills(self, active_only: bool = True) -> list[dict[str, Any]]:
         """
         列出所有可用的 Skills
         
@@ -55,7 +57,7 @@ class AstrBotSkillLoader:
                 return [s for s in self._skills_cache if s.get("active", True)]
             return self._skills_cache
         
-        skills = []
+        skills: list[dict[str, Any]] = []
         
         skill_manager = self._get_skill_manager()
         if skill_manager:
@@ -77,7 +79,7 @@ class AstrBotSkillLoader:
         
         return skills
     
-    def get_skill(self, name: str) -> Optional[Dict[str, Any]]:
+    def get_skill(self, name: str) -> dict[str, Any] | None:
         """获取指定 Skill"""
         skills = self.list_skills(active_only=False)
         for skill in skills:
@@ -85,7 +87,7 @@ class AstrBotSkillLoader:
                 return skill
         return None
     
-    def get_skill_content(self, name: str) -> Optional[str]:
+    def get_skill_content(self, name: str) -> str | None:
         """
         获取 Skill 的 SKILL.md 内容
         
@@ -128,7 +130,7 @@ class AstrBotSkillLoader:
         
         # 使用 AstrBot 原生的 prompt 构建
         try:
-            from astrbot.core.skills.skill_manager import build_skills_prompt, SkillInfo
+            from astrbot.core.skills.skill_manager import SkillInfo, build_skills_prompt
             
             skill_infos = [
                 SkillInfo(
@@ -139,7 +141,7 @@ class AstrBotSkillLoader:
                 )
                 for s in skills
             ]
-            return build_skills_prompt(skill_infos)
+            return cast(str, build_skills_prompt(skill_infos))
         except ImportError:
             # 备用实现
             lines = ["## 可用技能"]
@@ -147,7 +149,7 @@ class AstrBotSkillLoader:
                 lines.append(f"- **{skill['name']}**: {skill['description']}")
             return "\n".join(lines)
     
-    def invalidate_cache(self):
+    def invalidate_cache(self) -> None:
         """使缓存失效"""
         self._cache_valid = False
         self._skills_cache = []

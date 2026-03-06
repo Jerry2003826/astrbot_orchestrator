@@ -7,11 +7,10 @@ from __future__ import annotations
 import logging
 import os
 import time
-import asyncio
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional, cast
 
+from ..artifacts import ArtifactService
 from .task_analyzer import TaskPlan
-from .code_extractor import CodeExtractor, CodeWriter
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +28,14 @@ class MetaOrchestrator:
         agent_manager,
         coordinator,
         config: Optional[Dict[str, Any]] = None,
-    ):
+        artifact_service: ArtifactService | None = None,
+    ) -> None:
         self.context = context
         self.task_analyzer = task_analyzer
         self.agent_manager = agent_manager
         self.coordinator = coordinator
         self.config = config or {}
+        self.artifact_service: ArtifactService = artifact_service or ArtifactService(self.PERSIST_DIR)
         
         # 确保持久化目录存在
         os.makedirs(self.PERSIST_DIR, exist_ok=True)
@@ -57,14 +58,28 @@ class MetaOrchestrator:
         logger.info("步骤2完成: 创建了 %d 个 agents", len(agents))
         
         logger.info("步骤3: 执行任务...")
-        result = await self.coordinator.execute(
-            plan=plan,
-            agents=agents,
-            event=event,
-            is_admin=is_admin,
-            provider_id=provider_id,
+        result = cast(
+            dict[str, Any],
+            await self.coordinator.execute(
+                plan=plan,
+                agents=agents,
+                event=event,
+                is_admin=is_admin,
+                provider_id=provider_id,
+            ),
         )
         logger.info("步骤3完成: status=%s", result.get("status"))
+
+        if not is_admin:
+            logger.info("非管理员请求，跳过代码文件持久化与沙盒导出")
+            result["answer"] += "\n\n⚠️ 非管理员请求不会自动写入或持久化文件。"
+            if self.config.get("auto_cleanup_agents", True):
+                logger.info("步骤4: 清理 SubAgents...")
+                await self.agent_manager.cleanup(agents)
+            if plan.summary:
+                result["answer"] = f"{plan.summary}\n\n{result['answer']}"
+            logger.info("MetaOrchestrator 处理完成（只读模式）")
+            return result
 
         # ★ 增强兜底：合并所有任务输出，尝试提取代码
         created_files = result.get("created_files", [])
@@ -79,10 +94,9 @@ class MetaOrchestrator:
         # 不再依赖沙盒导出（沙盒文件可能随会话结束被清理）
         logger.info("步骤4: 保存文件到 AstrBot 持久化目录...")
         project_name = f"project_{int(time.time())}"
-        persist_result = await self._persist_files_locally(
+        persist_result = self.artifact_service.persist_result(
             result=result,
             project_name=project_name,
-            event=event,
         )
         
         if persist_result.get("success") and persist_result.get("saved_files"):
@@ -135,67 +149,6 @@ class MetaOrchestrator:
         logger.info("MetaOrchestrator 处理完成")
         return result
 
-    async def _persist_files_locally(
-        self,
-        result: Dict[str, Any],
-        project_name: str,
-        event=None,
-    ) -> Dict[str, Any]:
-        """
-        直接从 LLM 输出中提取代码，保存到 AstrBot 本地持久化目录。
-        不依赖沙盒，直接用 Python 文件 I/O 写入。
-        """
-        extractor = CodeExtractor()
-        saved_files = []
-        
-        # 合并所有任务输出
-        all_outputs = result.get("_all_task_outputs", [])
-        combined_text = "\n\n".join(all_outputs) if all_outputs else ""
-        
-        # 也检查 answer 本身
-        answer_text = result.get("answer", "") or ""
-        if answer_text:
-            combined_text = combined_text + "\n\n" + answer_text
-        
-        if not combined_text:
-            return {"success": False, "error": "无输出内容"}
-        
-        # 提取代码文件
-        files = extractor.extract_web_project(combined_text)
-        if not files:
-            logger.info("本地持久化: 未提取到代码文件")
-            return {"success": True, "saved_files": [], "path": ""}
-        
-        # 创建项目目录
-        local_project_dir = os.path.join(self.PERSIST_DIR, project_name)
-        os.makedirs(local_project_dir, exist_ok=True)
-        
-        # 写入文件
-        for filename, content in files.items():
-            try:
-                file_path = os.path.join(local_project_dir, filename)
-                file_dir = os.path.dirname(file_path)
-                os.makedirs(file_dir, exist_ok=True)
-                
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                
-                saved_files.append(filename)
-                logger.info("✅ 本地持久化: %s (%d bytes)", file_path, len(content))
-            except Exception as e:
-                logger.warning("⚠️ 本地持久化失败: %s -> %s", filename, e)
-        
-        if saved_files:
-            logger.info("✅ 本地持久化完成: %d 个文件 -> %s", len(saved_files), local_project_dir)
-            return {
-                "success": True,
-                "path": local_project_dir,
-                "saved_files": saved_files,
-                "total": len(saved_files),
-            }
-        
-        return {"success": True, "saved_files": [], "path": ""}
-
     async def _fallback_extract_code(
         self,
         result: Dict[str, Any],
@@ -207,42 +160,40 @@ class MetaOrchestrator:
         
         如果所有任务输出中都没有代码块，则尝试让 LLM 重新生成一次带代码的回答。
         """
-        extractor = CodeExtractor()
-        created_files = []
+        created_files: list[str] = []
+        combined_text = self.artifact_service.collect_output_text(result)
 
         # 策略1: 合并所有任务输出，统一提取
-        all_outputs = result.get("_all_task_outputs", [])
-        combined_text = "\n\n".join(all_outputs) if all_outputs else ""
-        
-        # 也检查 answer 本身
-        answer_text = result.get("answer", "") or ""
-        if answer_text and answer_text not in combined_text:
-            combined_text = combined_text + "\n\n" + answer_text
+        all_outputs = cast(list[str], result.get("_all_task_outputs", []))
 
         if combined_text:
-            should_save = extractor.should_save_code(combined_text)
-            code_blocks = extractor.extract_code_blocks(combined_text)
+            should_save = self.artifact_service.should_save_output_text(combined_text)
+            code_block_count = self.artifact_service.count_code_blocks(combined_text)
             logger.info(
                 "兜底代码检测（合并输出）: should_save=%s, code_blocks=%d, combined_len=%d",
-                should_save, len(code_blocks), len(combined_text)
+                should_save,
+                code_block_count,
+                len(combined_text),
             )
 
-            if (should_save or len(code_blocks) > 0) and event:
-                files = extractor.extract_web_project(combined_text)
-                if files:
-                    executor = self.coordinator.capability_builder.executor
-                    if executor:
-                        project_name = f"project_{int(time.time())}"
-                        code_writer = CodeWriter(executor, base_path="/workspace")
-                        success, written_files = await code_writer.write_files(
-                            files=files,
+            if (should_save or code_block_count > 0) and event:
+                executor = self.coordinator.capability_builder.executor
+                if executor:
+                    project_name = f"project_{int(time.time())}"
+                    written_files = cast(
+                        list[str],
+                        await self.artifact_service.write_output_to_workspace(
+                            output_text=combined_text,
+                            executor=executor,
                             event=event,
-                            project_name=project_name
-                        )
-                        if success and written_files:
-                            created_files = written_files
-                            logger.info("兜底写入成功（合并输出）: files=%s", written_files)
-                            return created_files
+                            project_name=project_name,
+                            base_path="/workspace",
+                        ),
+                    )
+                    if written_files:
+                        created_files = written_files
+                        logger.info("兜底写入成功（合并输出）: files=%s", written_files)
+                        return created_files
 
         # 策略2: 如果合并输出中也没有代码，尝试让 LLM 重新生成
         if not created_files and event and all_outputs:
@@ -297,23 +248,24 @@ print("hello")
             )
 
             output_text = response.completion_text
-            extractor = CodeExtractor()
-            
-            if extractor.should_save_code(output_text):
-                files = extractor.extract_web_project(output_text)
-                if files:
-                    executor = self.coordinator.capability_builder.executor
-                    if executor:
-                        project_name = f"project_{int(time.time())}"
-                        code_writer = CodeWriter(executor, base_path="/workspace")
-                        success, written_files = await code_writer.write_files(
-                            files=files,
+
+            if self.artifact_service.should_save_output_text(output_text):
+                executor = self.coordinator.capability_builder.executor
+                if executor:
+                    project_name = f"project_{int(time.time())}"
+                    written_files = cast(
+                        list[str],
+                        await self.artifact_service.write_output_to_workspace(
+                            output_text=output_text,
+                            executor=executor,
                             event=event,
-                            project_name=project_name
-                        )
-                        if success and written_files:
-                            logger.info("兜底策略2成功: 重新生成并写入 %d 个文件", len(written_files))
-                            return written_files
+                            project_name=project_name,
+                            base_path="/workspace",
+                        ),
+                    )
+                    if written_files:
+                        logger.info("兜底策略2成功: 重新生成并写入 %d 个文件", len(written_files))
+                        return written_files
 
         except Exception as e:
             logger.warning("重新生成代码失败: %s", e)
@@ -338,99 +290,19 @@ print("hello")
             executor = self.coordinator.capability_builder.executor
             if not executor:
                 return {"success": False, "error": "执行器不可用"}
-            
-            # 获取沙盒实例
-            try:
-                sandbox = await executor.get_sandbox(event=event)
-            except Exception as e:
-                logger.error("获取沙盒失败: %s", e)
-                return {"success": False, "error": f"获取沙盒失败: {e}"}
-            
-            # 创建本地项目目录
-            local_project_dir = os.path.join(self.PERSIST_DIR, project_name)
-            os.makedirs(local_project_dir, exist_ok=True)
-            
-            saved_files = []
-            
-            try:
-                # ★ 修复：搜索 Shipyard 沙盒的实际路径
-                # Shipyard 的 workspace 在 /home/ship_xxx/workspace/ 下
-                list_result = await sandbox.aexec(
-                    "find /home/ship_*/workspace /workspace -type f "
-                    "-not -path '*/\\.git/*' -not -path '*/__pycache__/*' "
-                    "-not -name '*.pyc' -not -path '*/skills/*' "
-                    "2>/dev/null | head -200",
-                    kernel="bash"
-                )
-                
-                all_files = []
-                if list_result.text:
-                    for line in list_result.text.strip().splitlines():
-                        line = line.strip()
-                        if line and ("/workspace/" in line) and ("project_" in line or "." in os.path.basename(line)):
-                            all_files.append(line)
-                
-                logger.info("沙盒中发现 %d 个文件", len(all_files))
-                
-                if not all_files and created_files:
-                    all_files = created_files
-                    logger.info("使用 created_files 列表: %d 个文件", len(all_files))
-                
-                # 逐个下载文件
-                for remote_path in all_files:
-                    try:
-                        # 计算相对路径
-                        # 处理 /home/ship_xxx/workspace/project_xxx/file 格式
-                        if "/workspace/" in remote_path:
-                            rel_path = remote_path.split("/workspace/", 1)[1]
-                        else:
-                            rel_path = os.path.basename(remote_path)
-                        
-                        if not rel_path:
-                            continue
-                        
-                        # 通过 cat 读取文件内容（比 base64 更可靠）
-                        read_result = await sandbox.aexec(
-                            f"cat '{remote_path}' 2>/dev/null",
-                            kernel="bash"
-                        )
-                        
-                        if read_result.text and read_result.exit_code == 0:
-                            content = read_result.text
-                            
-                            # 保存到本地
-                            local_path = os.path.join(local_project_dir, rel_path)
-                            local_dir = os.path.dirname(local_path)
-                            os.makedirs(local_dir, exist_ok=True)
-                            
-                            with open(local_path, "w", encoding="utf-8") as f:
-                                f.write(content)
-                            
-                            saved_files.append(rel_path)
-                            logger.info("✅ 已导出: %s -> %s", remote_path, local_path)
-                        else:
-                            logger.warning("⚠️ 无法读取文件: %s (exit=%d)", remote_path, read_result.exit_code)
-                            
-                    except Exception as file_err:
-                        logger.warning("⚠️ 导出文件失败: %s -> %s", remote_path, file_err)
-                        continue
-                
-            except Exception as scan_err:
-                logger.error("扫描沙盒文件失败: %s", scan_err)
-            
-            if saved_files:
-                return {
-                    "success": True,
-                    "path": local_project_dir,
-                    "saved_files": saved_files,
-                    "total": len(saved_files)
-                }
-            else:
-                return {"success": True, "path": local_project_dir, "saved_files": [], "total": 0}
+            return cast(
+                dict[str, Any],
+                await self.artifact_service.export_sandbox_files(
+                    executor=executor,
+                    event=event,
+                    project_name=project_name,
+                    created_files=created_files,
+                ),
+            )
             
         except Exception as e:
             logger.error("导出文件失败: %s", e, exc_info=True)
             return {"success": False, "error": str(e)}
 
     def status(self) -> str:
-        return self.agent_manager.list_agents()
+        return str(self.agent_manager.list_agents())

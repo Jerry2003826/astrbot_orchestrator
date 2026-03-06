@@ -5,7 +5,7 @@
 """
 
 from .engine import WorkflowEngine
-from .nodes import WorkflowNode, WorkflowDefinition, NodeType
+from .nodes import NodeType, WorkflowDefinition, WorkflowNode
 
 __all__ = [
     "WorkflowEngine",

@@ -17,6 +17,7 @@ import logging
 import os
 import socket
 import typing as t
+from importlib.util import find_spec
 
 from .base import CodeSandbox
 
@@ -54,8 +55,8 @@ def is_inside_shipyard_sandbox() -> bool:
             hostname = socket.gethostname()
             if hostname.startswith("ship-"):
                 result = True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("读取 hostname 失败，跳过 Shipyard hostname 检测: %s", exc)
 
     # 方法3: 检查标记文件
     if not result:
@@ -183,7 +184,8 @@ async def detect_available_mode(context=None) -> str:
 
     # 检查 Shipyard 是否可用
     try:
-        from astrbot.core.computer.computer_client import get_booter
+        if find_spec("astrbot.core.computer.computer_client") is None:
+            return "local"
         logger.info("[SandboxFactory] Shipyard computer_client 可用")
         return "shipyard"
     except ImportError:

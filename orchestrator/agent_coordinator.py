@@ -9,12 +9,13 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+from ..artifacts import ArtifactService
 from .agent_bus import AgentMessageBus
 from .agent_templates import AgentSpec
+from .code_extractor import CodeExtractor
 from .task_analyzer import AgentTask, TaskPlan
-from .code_extractor import CodeExtractor, CodeWriter
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,19 @@ class TaskResult:
 class AgentCoordinator:
     """协调多个 SubAgent 的任务执行"""
 
-    def __init__(self, context, capability_builder, config: Optional[Dict] = None):
+    def __init__(
+        self,
+        context,
+        capability_builder,
+        config: Optional[Dict] = None,
+        artifact_service: ArtifactService | None = None,
+    ) -> None:
         self.context = context
         self.capability_builder = capability_builder
         self.config = config or {}
+        self.artifact_service: ArtifactService = artifact_service or ArtifactService(
+            "/AstrBot/data/agent_projects"
+        )
         self.bus = AgentMessageBus()
         self.verbose_logs = self.config.get("subagent_verbose_logs", False) or self.config.get(
             "debug_mode", False
@@ -50,7 +60,7 @@ class AgentCoordinator:
         event,
         is_admin: bool,
         provider_id: str,
-    ) -> Dict[str, str]:
+    ) -> dict[str, Any]:
         # 每次执行前重置状态
         self.all_created_files = []
         self._all_task_outputs = []
@@ -120,11 +130,23 @@ class AgentCoordinator:
                     task.action,
                 )
             if task.action == "create_skill":
+                if not is_admin:
+                    return TaskResult(
+                        task_id=task.task_id,
+                        status="skipped",
+                        output="需要管理员权限才能创建 Skill",
+                    )
                 output = await self.capability_builder.build_skill(
                     task_description=task.input or task.description,
                     provider_id=provider_id,
                 )
             elif task.action == "config_mcp":
+                if not is_admin:
+                    return TaskResult(
+                        task_id=task.task_id,
+                        status="skipped",
+                        output="需要管理员权限才能配置 MCP",
+                    )
                 output = await self.capability_builder.configure_mcp(
                     task_description=task.input or task.description,
                     provider_id=provider_id,
@@ -137,7 +159,13 @@ class AgentCoordinator:
                         "任务 %s 的 execute_code input 是自然语言，降级为 llm 任务: %s",
                         task.task_id, (task.input or "")[:80],
                     )
-                    output, created_files = await self._run_llm_task(task, agent, provider_id, event)
+                    output, created_files = await self._run_llm_task(
+                        task,
+                        agent,
+                        provider_id,
+                        event,
+                        is_admin=is_admin,
+                    )
                 elif not is_admin:
                     return TaskResult(task_id=task.task_id, status="skipped", output="需要管理员权限")
                 else:
@@ -148,7 +176,13 @@ class AgentCoordinator:
                     )
             else:
                 # LLM 任务，传递 event 以便写入文件
-                output, created_files = await self._run_llm_task(task, agent, provider_id, event)
+                output, created_files = await self._run_llm_task(
+                    task,
+                    agent,
+                    provider_id,
+                    event,
+                    is_admin=is_admin,
+                )
 
             self.bus.publish(sender, f"{task.description} 完成")
             if self.verbose_logs:
@@ -202,7 +236,8 @@ class AgentCoordinator:
         task: AgentTask,
         agent: Optional[AgentSpec],
         provider_id: str,
-        event=None
+        event=None,
+        is_admin: bool = False,
     ) -> tuple:
         """
         执行 LLM 任务，并自动提取代码写入文件系统
@@ -269,7 +304,7 @@ class AgentCoordinator:
             )
             
             # 放宽条件：只要有代码块且有 event 就尝试保存
-            if (should_save or has_any_code) and event:
+            if (should_save or has_any_code) and event and is_admin:
                 logger.info("检测到代码，开始提取并写入文件系统: task=%s (blocks=%d)", task.task_id, len(code_blocks))
                 
                 # 提取代码文件
@@ -282,16 +317,16 @@ class AgentCoordinator:
                     if executor:
                         # 生成项目名称（基于时间戳）
                         project_name = f"project_{int(time.time())}"
-                        
-                        # 写入文件（使用 upload 接口绕过权限检查）
-                        code_writer = CodeWriter(executor, base_path="/workspace")
-                        success, written_files = await code_writer.write_files(
+
+                        written_files = await self.artifact_service.write_files_to_workspace(
                             files=files,
+                            executor=executor,
                             event=event,
-                            project_name=project_name
+                            project_name=project_name,
+                            base_path="/workspace",
                         )
-                        
-                        if success and written_files:
+
+                        if written_files:
                             created_files = written_files
                             self.all_created_files.extend(written_files)
                             logger.info(
@@ -305,14 +340,17 @@ class AgentCoordinator:
                             output_text += f"\n\n📁 **已创建文件:**\n{file_list}"
                         else:
                             logger.warning(
-                                "⚠️ 文件写入失败或无文件: task=%s, success=%s, written=%s",
-                                task.task_id, success, written_files
+                                "⚠️ 文件写入失败或无文件: task=%s, written=%s",
+                                task.task_id, written_files
                             )
                     else:
                         logger.warning("⚠️ 执行器不可用，无法写入文件: task=%s", task.task_id)
                 else:
                     logger.warning("⚠️ 代码提取结果为空: task=%s", task.task_id)
-            
+            elif (should_save or has_any_code) and event and not is_admin:
+                logger.info("检测到代码，但当前不是管理员请求，跳过自动写入: task=%s", task.task_id)
+                output_text += "\n\n⚠️ 当前请求不是管理员上下文，代码不会被自动写入文件系统。"
+
             return output_text, created_files
             
         except Exception as e:
@@ -347,7 +385,7 @@ class AgentCoordinator:
         plan: TaskPlan,
         results: Dict[str, TaskResult],
         agents: List[AgentSpec],
-    ) -> Dict[str, str]:
+    ) -> dict[str, Any]:
         total = len(plan.tasks)
         completed = sum(1 for r in results.values() if r.status == "completed")
 
@@ -394,6 +432,9 @@ class AgentCoordinator:
                 if result.created_files:
                     file_list = "\n".join([f"  - `{f}`" for f in result.created_files])
                     lines.append(f"\n📁 **任务文件:**\n{file_list}")
+            elif result.status == "skipped":
+                skip_reason = result.output or "已跳过"
+                lines.append(f"⏭️ {task.description}: {skip_reason}")
             else:
                 lines.append(f"❌ {task.description}: {result.error or '失败'}")
 

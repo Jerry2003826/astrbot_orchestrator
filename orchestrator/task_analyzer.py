@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from .agent_templates import AgentSpec, AgentTemplateLibrary
 
@@ -56,7 +56,7 @@ class TaskAnalyzer:
             try:
                 import json
 
-                return json.loads(overrides)
+                return cast(Dict[str, Any], json.loads(overrides))
             except Exception:
                 logger.warning("解析 subagent_template_overrides 失败")
         return {}
