@@ -179,8 +179,10 @@ class ArtifactService:
             if list_result.text:
                 for line in list_result.text.strip().splitlines():
                     line = line.strip()
-                    if line and "/workspace/" in line and (
-                        "project_" in line or "." in os.path.basename(line)
+                    if (
+                        line
+                        and "/workspace/" in line
+                        and ("project_" in line or "." in os.path.basename(line))
                     ):
                         all_files.append(line)
 
