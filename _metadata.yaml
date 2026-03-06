@@ -1,0 +1,12 @@
+# AstrBot 全自主智能体编排器插件配置
+
+name: astrbot_orchestrator
+desc: |
+  全自主智能体编排器 (CodeSandbox 增强版) - 通过聊天完成所有操作
+  🔍 搜索/安装插件 | ✍️ 创建 Skill | 🔌 配置 MCP | 🐛 自我 Debug | 🐳 CodeSandbox 沙盒
+version: 3.0.0
+author: Your Name
+repo: ""
+
+# 最低 AstrBot 版本要求
+astrbot_version: ">=4.10.0"

@@ -1,0 +1,109 @@
+# 数据分析工作流示例
+
+id: data_analysis
+name: 数据分析工作流
+description: 分析数据并生成可视化建议
+
+config:
+  timeout: 180
+
+nodes:
+  - id: start
+    type: start
+    name: 开始
+    next_nodes:
+      - check_data_type
+  
+  - id: check_data_type
+    type: condition
+    name: 检查数据类型
+    condition: "'数据' in input or '分析' in input"
+    next_nodes:
+      - analyze_data
+      - simple_response
+  
+  - id: analyze_data
+    type: agent
+    name: 分析数据需求
+    config:
+      system_prompt: |
+        你是一个数据分析专家。
+        分析用户的数据分析需求，确定：
+        1. 数据类型
+        2. 分析目标
+        3. 推荐的分析方法
+      prompt: |
+        用户请求：{input}
+        
+        请分析数据需求并给出分析方案。
+      output_variable: analysis_plan
+    next_nodes:
+      - generate_insights
+  
+  - id: generate_insights
+    type: agent
+    name: 生成洞察
+    config:
+      system_prompt: "你是一个数据洞察专家。"
+      prompt: |
+        基于以下分析方案，生成关键洞察：
+        
+        {analysis_plan}
+        
+        请给出主要发现和建议。
+      output_variable: insights
+    next_nodes:
+      - visualization_suggestions
+  
+  - id: visualization_suggestions
+    type: agent
+    name: 可视化建议
+    config:
+      system_prompt: "你是一个数据可视化专家。"
+      prompt: |
+        基于以下分析洞察，推荐合适的可视化方式：
+        
+        {insights}
+        
+        请推荐 2-3 种可视化方式及其适用场景。
+      output_variable: viz_suggestions
+    next_nodes:
+      - compile_report
+  
+  - id: compile_report
+    type: agent
+    name: 汇总报告
+    config:
+      system_prompt: "你是一个报告汇总专家。"
+      prompt: |
+        请将以下内容整合为一份完整的分析报告：
+        
+        ## 分析方案
+        {analysis_plan}
+        
+        ## 关键洞察
+        {insights}
+        
+        ## 可视化建议
+        {viz_suggestions}
+        
+        请生成一份结构清晰的完整报告。
+      output_variable: output
+    next_nodes:
+      - end
+  
+  - id: simple_response
+    type: agent
+    name: 简单响应
+    config:
+      system_prompt: "你是一个友好的助手。"
+      prompt: "{input}"
+      output_variable: output
+    next_nodes:
+      - end
+  
+  - id: end
+    type: end
+    name: 结束
+    config:
+      output_variable: output

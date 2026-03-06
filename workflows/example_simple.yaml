@@ -1,0 +1,28 @@
+# 简单工作流示例
+
+id: simple_qa
+name: 简单问答工作流
+description: 直接回答用户问题
+
+nodes:
+  - id: start
+    type: start
+    name: 开始
+    next_nodes:
+      - process
+  
+  - id: process
+    type: agent
+    name: 处理问题
+    config:
+      system_prompt: "你是一个友好的助手。"
+      prompt: "${input}"
+      output_variable: answer
+    next_nodes:
+      - end
+  
+  - id: end
+    type: end
+    name: 结束
+    config:
+      output_variable: answer

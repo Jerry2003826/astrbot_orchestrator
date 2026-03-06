@@ -1,0 +1,81 @@
+# 研究分析工作流示例
+
+id: research_analysis
+name: 研究分析工作流
+description: 分析主题并生成报告
+
+nodes:
+  - id: start
+    type: start
+    name: 开始
+    next_nodes:
+      - analyze_topic
+  
+  - id: analyze_topic
+    type: agent
+    name: 分析主题
+    config:
+      system_prompt: |
+        你是一个研究分析专家。
+        请分析用户给出的主题，提取关键概念和研究方向。
+      prompt: |
+        请分析以下主题：{input}
+        
+        提取：
+        1. 核心概念
+        2. 关键问题
+        3. 研究方向
+      output_variable: analysis
+    next_nodes:
+      - generate_outline
+  
+  - id: generate_outline
+    type: agent
+    name: 生成大纲
+    config:
+      system_prompt: "你是一个报告结构专家。"
+      prompt: |
+        基于以下分析，生成报告大纲：
+        
+        {analysis}
+        
+        请生成一个结构清晰的报告大纲。
+      output_variable: outline
+    next_nodes:
+      - write_report
+  
+  - id: write_report
+    type: agent
+    name: 撰写报告
+    config:
+      system_prompt: "你是一个专业的报告撰写者。"
+      prompt: |
+        请根据以下大纲撰写完整报告：
+        
+        原始主题：{input}
+        分析：{analysis}
+        大纲：{outline}
+        
+        请撰写一份完整的报告。
+      output_variable: report
+    next_nodes:
+      - summarize
+  
+  - id: summarize
+    type: agent
+    name: 生成摘要
+    config:
+      system_prompt: "你是一个摘要生成专家。"
+      prompt: |
+        请为以下报告生成一段简短的摘要（100字以内）：
+        
+        {report}
+      output_variable: summary
+    next_nodes:
+      - end
+  
+  - id: end
+    type: end
+    name: 结束
+    config:
+      output_variable: report
