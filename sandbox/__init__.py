@@ -16,9 +16,9 @@ Usage:
     print(result.text)
 """
 
-from .types import ExecResult, ExecChunk, SandboxFile
 from .base import CodeSandbox
 from .factory import create_sandbox, is_inside_shipyard_sandbox
+from .types import ExecChunk, ExecResult, SandboxFile
 
 __all__ = [
     "CodeSandbox",

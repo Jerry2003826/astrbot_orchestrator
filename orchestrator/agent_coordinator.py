@@ -60,8 +60,8 @@ class AgentCoordinator:
 
     def _get_plugin_projects_dir(self) -> str:
         """获取插件的项目存储目录。"""
-        from pathlib import Path
         import os
+        from pathlib import Path
 
         # 从当前文件位置推断插件目录
         current_file = Path(__file__).resolve()
