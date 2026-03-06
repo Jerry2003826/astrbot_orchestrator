@@ -124,8 +124,27 @@ class DynamicOrchestrator:
         self.plan_pipeline = self._build_plan_pipeline()
         self.reasoning_pipeline = self._build_reasoning_pipeline()
         
-        # 项目目录
-        self.projects_dir = "/AstrBot/data/agent_projects"
+        # 项目目录 - 使用 context 传递的路径，或从 ArtifactService 获取
+        self.projects_dir = self._get_projects_dir()
+
+    def _get_projects_dir(self) -> str:
+        """获取项目存储目录。"""
+        import os
+        from pathlib import Path
+        
+        # 优先从 meta_orchestrator 的 artifact_service 获取
+        if self.meta_orchestrator and hasattr(self.meta_orchestrator, 'artifact_service'):
+            artifact_service = self.meta_orchestrator.artifact_service
+            if artifact_service and hasattr(artifact_service, 'persist_dir'):
+                return artifact_service.persist_dir
+        
+        # 备选：从当前文件位置推断插件目录
+        current_file = Path(__file__).resolve()
+        plugin_root = current_file.parent.parent  # astrbot_orchestrator_v5 目录
+        projects_dir = os.path.join(str(plugin_root), "projects")
+        os.makedirs(projects_dir, exist_ok=True)
+        
+        return projects_dir
 
     async def _run_model_text(
         self,

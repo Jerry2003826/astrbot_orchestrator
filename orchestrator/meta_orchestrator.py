@@ -18,9 +18,6 @@ logger = logging.getLogger(__name__)
 class MetaOrchestrator:
     """元编排器：分析任务 -> 动态创建 SubAgent -> 协调执行"""
 
-    # 持久化目录（astrbot 容器内，会被 docker volume 持久化）
-    PERSIST_DIR = "/AstrBot/data/agent_projects"
-
     def __init__(
         self,
         context,
@@ -35,10 +32,28 @@ class MetaOrchestrator:
         self.agent_manager = agent_manager
         self.coordinator = coordinator
         self.config = config or {}
-        self.artifact_service: ArtifactService = artifact_service or ArtifactService(self.PERSIST_DIR)
+        
+        # 使用传入的 artifact_service，或者动态获取插件目录
+        if artifact_service:
+            self.artifact_service = artifact_service
+        else:
+            # 动态获取插件目录下的 projects 文件夹
+            persist_dir = self._get_plugin_projects_dir()
+            self.artifact_service = ArtifactService(persist_dir)
         
         # 确保持久化目录存在
-        os.makedirs(self.PERSIST_DIR, exist_ok=True)
+        os.makedirs(self.artifact_service.persist_dir, exist_ok=True)
+    
+    def _get_plugin_projects_dir(self) -> str:
+        """获取插件的项目存储目录。"""
+        from pathlib import Path
+        
+        # 从当前文件位置推断插件目录
+        current_file = Path(__file__).resolve()
+        plugin_root = current_file.parent.parent  # astrbot_orchestrator_v5 目录
+        projects_dir = plugin_root / "projects"
+        
+        return str(projects_dir)
 
     async def process(
         self,
@@ -279,12 +294,12 @@ print("hello")
         project_name: str
     ) -> Dict[str, Any]:
         """
-        从沙盒导出文件到 astrbot 持久化目录（备用方案）
+        从沙盒导出文件到插件持久化目录（备用方案）
         
         策略：
         1. 搜索 /home/ship_*/workspace/ 下的文件（Shipyard 实际路径）
         2. 也搜索 /workspace/ 下的文件
-        3. 将文件保存到 /AstrBot/data/agent_projects/{project_name}/
+        3. 将文件保存到 {插件目录}/projects/{project_name}/
         """
         try:
             executor = self.coordinator.capability_builder.executor

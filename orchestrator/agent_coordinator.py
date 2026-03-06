@@ -42,9 +42,14 @@ class AgentCoordinator:
         self.context = context
         self.capability_builder = capability_builder
         self.config = config or {}
-        self.artifact_service: ArtifactService = artifact_service or ArtifactService(
-            "/AstrBot/data/agent_projects"
-        )
+        
+        # 使用传入的 artifact_service，或者动态获取插件目录
+        if artifact_service:
+            self.artifact_service = artifact_service
+        else:
+            persist_dir = self._get_plugin_projects_dir()
+            self.artifact_service = ArtifactService(persist_dir)
+        
         self.bus = AgentMessageBus()
         self.verbose_logs = self.config.get("subagent_verbose_logs", False) or self.config.get(
             "debug_mode", False
@@ -52,6 +57,21 @@ class AgentCoordinator:
         self.code_extractor = CodeExtractor()
         self.all_created_files: List[str] = []  # 记录所有创建的文件
         self._all_task_outputs: List[str] = []  # 记录所有任务的原始输出（用于兜底提取）
+    
+    def _get_plugin_projects_dir(self) -> str:
+        """获取插件的项目存储目录。"""
+        from pathlib import Path
+        import os
+        
+        # 从当前文件位置推断插件目录
+        current_file = Path(__file__).resolve()
+        plugin_root = current_file.parent.parent  # astrbot_orchestrator_v5 目录
+        projects_dir = plugin_root / "projects"
+        
+        # 确保目录存在
+        os.makedirs(projects_dir, exist_ok=True)
+        
+        return str(projects_dir)
 
     async def execute(
         self,
