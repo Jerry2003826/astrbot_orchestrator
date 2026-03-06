@@ -247,7 +247,9 @@ def test_mcp_configurator_get_mcp_config_path_supports_import_and_fallback(
         return original_import(name, globals_dict, locals_dict, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", import_failure)
-    monkeypatch.setattr(mcp_module.os.path, "expanduser", lambda path: "/tmp/fallback/mcp_config.json")
+    monkeypatch.setattr(
+        mcp_module.os.path, "expanduser", lambda path: "/tmp/fallback/mcp_config.json"
+    )
 
     assert tool._get_mcp_config_path() == "/tmp/fallback/mcp_config.json"
 
@@ -457,7 +459,10 @@ async def test_mcp_configurator_add_server_skips_enable_when_tool_manager_unavai
     result = await tool.add_server("search", "https://example.com/sse")
 
     assert "✅ MCP 服务器 `search` 添加成功！" in result
-    assert json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]["search"]["active"] is True
+    assert (
+        json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]["search"]["active"]
+        is True
+    )
 
 
 @pytest.mark.asyncio

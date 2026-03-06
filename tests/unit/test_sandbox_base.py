@@ -145,8 +145,10 @@ async def test_code_sandbox_file_from_url_runs_download_script() -> None:
     assert result.path == 'assets/"logo".png'
     assert sandbox.download_calls == ['assets/"logo".png']
     executed_code, kernel, timeout, cwd = sandbox.exec_calls[0]
-    assert "async with client.stream('GET', \"https://example.com/file?q=\\\"x\\\"\")" in executed_code
-    assert "with open(\"assets/\\\"logo\\\".png\", 'wb') as f:" in executed_code
+    assert (
+        'async with client.stream(\'GET\', "https://example.com/file?q=\\"x\\"")' in executed_code
+    )
+    assert 'with open("assets/\\"logo\\".png", \'wb\') as f:' in executed_code
     assert kernel == "ipython"
     assert timeout is None
     assert cwd is None
@@ -162,9 +164,9 @@ async def test_code_sandbox_install_and_list_packages_use_bash_exec() -> None:
         exit_code=0,
         kernel="bash",
     )
-    sandbox.exec_results[
-        ("pip list --format=columns | tail -n +3 | cut -d ' ' -f 1", "bash")
-    ] = ExecResult(text="httpx\nrich\n", exit_code=0, kernel="bash")
+    sandbox.exec_results[("pip list --format=columns | tail -n +3 | cut -d ' ' -f 1", "bash")] = (
+        ExecResult(text="httpx\nrich\n", exit_code=0, kernel="bash")
+    )
 
     install_result = await sandbox.ainstall("httpx", "rich")
     packages = await sandbox.alist_packages()
@@ -228,9 +230,9 @@ async def test_code_sandbox_restart_healthcheck_and_status_fallbacks() -> None:
     sandbox = StubSandbox()
     sandbox.exec_results[("%restart", "ipython")] = ExecResult(text="", kernel="ipython")
     sandbox.exec_results[("echo ok", "bash")] = ExecResult(text="ok", kernel="bash")
-    sandbox.exec_errors[
-        ("pip list --format=columns | tail -n +3 | cut -d ' ' -f 1", "bash")
-    ] = RuntimeError("pip error")
+    sandbox.exec_errors[("pip list --format=columns | tail -n +3 | cut -d ' ' -f 1", "bash")] = (
+        RuntimeError("pip error")
+    )
     sandbox.exec_errors[("%who", "ipython")] = RuntimeError("who error")
 
     await sandbox.arestart()

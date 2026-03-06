@@ -77,7 +77,7 @@ def test_runtime_pipeline_strip_markdown_code_fences_handles_plain_and_unclosed_
     """剥离围栏应覆盖普通文本、无结束围栏等路径。"""
 
     assert _strip_markdown_code_fences("plain text") == "plain text"
-    assert _strip_markdown_code_fences("```json\n{\"a\": 1}") == '{"a": 1}'
+    assert _strip_markdown_code_fences('```json\n{"a": 1}') == '{"a": 1}'
 
 
 def test_runtime_pipeline_strip_markdown_code_fences_covers_defensive_branches() -> None:

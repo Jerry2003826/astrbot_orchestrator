@@ -104,9 +104,7 @@ def test_extract_code_blocks_skip_empty_and_cover_text_fallback_variants() -> No
 
     extractor = CodeExtractor()
     mixed_text = (
-        "```python\n\n```\n"
-        "```\nplain text content\n```\n"
-        "``` notes.foo\nhello world content\n```"
+        "```python\n\n```\n```\nplain text content\n```\n``` notes.foo\nhello world content\n```"
     )
 
     blocks = extractor.extract_code_blocks(mixed_text)
@@ -128,15 +126,13 @@ def test_extract_code_blocks_returns_empty_when_text_has_no_fences() -> None:
     assert extractor.extract_code_blocks("plain explanation only") == []
 
 
-def test_extract_code_blocks_preserves_non_chinese_filename_and_keeps_commentless_sql_without_name() -> None:
+def test_extract_code_blocks_preserves_non_chinese_filename_and_keeps_commentless_sql_without_name() -> (
+    None
+):
     """无扩展名英文文件名应保留，未命中注释的 SQL 块应保持无文件名。"""
 
     extractor = CodeExtractor()
-    text = (
-        "```python README\nprint('hello')\n```\n"
-        "just description\n"
-        "```sql\nselect 1;\n```"
-    )
+    text = "```python README\nprint('hello')\n```\njust description\n```sql\nselect 1;\n```"
 
     blocks = extractor.extract_code_blocks(text)
 
@@ -151,10 +147,7 @@ def test_extract_web_project_generates_default_txt_names_for_unknown_language_bl
     """未知语言且无文件名时应生成默认 txt 文件名并自动去重。"""
 
     extractor = CodeExtractor()
-    text = (
-        "```custom\nfirst custom block content\n```\n"
-        "```custom\nsecond custom block content\n```"
-    )
+    text = "```custom\nfirst custom block content\n```\n```custom\nsecond custom block content\n```"
 
     files = extractor.extract_web_project(text)
 
@@ -182,7 +175,7 @@ def test_extract_code_blocks_infers_language_from_filename_without_lang() -> Non
     """缺少语言时应根据文件扩展名推断语言。"""
 
     extractor = CodeExtractor()
-    text = "``` config.json\n{\"ok\": true}\n```"
+    text = '``` config.json\n{"ok": true}\n```'
 
     blocks = extractor.extract_code_blocks(text)
 
@@ -244,10 +237,7 @@ def test_extract_web_project_deduplicates_default_filenames() -> None:
     """多个同类默认文件名应自动追加序号。"""
 
     extractor = CodeExtractor()
-    text = (
-        "```javascript\nconsole.log('a')\n```\n"
-        "```javascript\nconsole.log('b')\n```"
-    )
+    text = "```javascript\nconsole.log('a')\n```\n```javascript\nconsole.log('b')\n```"
 
     files = extractor.extract_web_project(text)
 
@@ -382,9 +372,7 @@ async def test_code_writer_falls_back_to_upload_when_write_result_unexpected() -
 
     assert success is True
     assert created_files == ["/workspace/demo/main.py"]
-    assert executor.sandbox.uploads == [
-        ("/workspace/demo/main.py", "print('fallback')")
-    ]
+    assert executor.sandbox.uploads == [("/workspace/demo/main.py", "print('fallback')")]
 
 
 @pytest.mark.asyncio

@@ -630,11 +630,14 @@ async def test_meta_orchestrator_fallback_extract_covers_strategy1_skip_paths(
     artifact_service.should_save = False
     artifact_service.code_block_count = 0
     artifact_service.written_files = []
-    assert await non_savable._fallback_extract_code(
-        result={"answer": "", "_all_task_outputs": []},
-        event=object(),
-        provider_id="provider-1",
-    ) == []
+    assert (
+        await non_savable._fallback_extract_code(
+            result={"answer": "", "_all_task_outputs": []},
+            event=object(),
+            provider_id="provider-1",
+        )
+        == []
+    )
 
     missing_executor = MetaOrchestrator(
         context=SimpleNamespace(),
@@ -646,11 +649,14 @@ async def test_meta_orchestrator_fallback_extract_covers_strategy1_skip_paths(
     artifact_service.combined_text = '```python:main.py\nprint("ok")\n```'
     artifact_service.should_save = True
     artifact_service.code_block_count = 1
-    assert await missing_executor._fallback_extract_code(
-        result={"answer": "", "_all_task_outputs": []},
-        event=object(),
-        provider_id="provider-1",
-    ) == []
+    assert (
+        await missing_executor._fallback_extract_code(
+            result={"answer": "", "_all_task_outputs": []},
+            event=object(),
+            provider_id="provider-1",
+        )
+        == []
+    )
 
     empty_write = MetaOrchestrator(
         context=SimpleNamespace(),
@@ -660,11 +666,14 @@ async def test_meta_orchestrator_fallback_extract_covers_strategy1_skip_paths(
         artifact_service=artifact_service,
     )
     artifact_service.written_files = []
-    assert await empty_write._fallback_extract_code(
-        result={"answer": "", "_all_task_outputs": []},
-        event=object(),
-        provider_id="provider-1",
-    ) == []
+    assert (
+        await empty_write._fallback_extract_code(
+            result={"answer": "", "_all_task_outputs": []},
+            event=object(),
+            provider_id="provider-1",
+        )
+        == []
+    )
     assert len(artifact_service.write_calls) == 1
 
 
@@ -813,11 +822,14 @@ async def test_meta_orchestrator_regenerate_code_handles_no_save_missing_executo
         coordinator=FakeCoordinator({}, executor=None),
         artifact_service=artifact_service,
     )
-    assert await missing_executor_orchestrator._regenerate_code(
-        ["output"],
-        object(),
-        "provider-1",
-    ) == []
+    assert (
+        await missing_executor_orchestrator._regenerate_code(
+            ["output"],
+            object(),
+            "provider-1",
+        )
+        == []
+    )
 
     failing_context = FakeLlmContext(error=RuntimeError("llm down"))
     failing_orchestrator = MetaOrchestrator(

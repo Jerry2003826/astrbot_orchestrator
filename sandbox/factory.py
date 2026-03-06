@@ -100,9 +100,7 @@ def create_sandbox(
     """
     # 🔑 核心逻辑：如果已在沙盒内，强制使用 local 模式
     if mode in ("shipyard", "auto") and is_inside_shipyard_sandbox():
-        logger.info(
-            "[SandboxFactory] 已在 Shipyard 沙盒内，跳过嵌套沙盒创建，使用 local 模式"
-        )
+        logger.info("[SandboxFactory] 已在 Shipyard 沙盒内，跳过嵌套沙盒创建，使用 local 模式")
         return _create_local(session_id=session_id, cwd=cwd, timeout=timeout)
 
     if mode == "local":
@@ -129,9 +127,7 @@ def create_sandbox(
                     timeout=timeout,
                 )
             except Exception as e:
-                logger.warning(
-                    "[SandboxFactory] Shipyard 不可用，回退到 local: %s", e
-                )
+                logger.warning("[SandboxFactory] Shipyard 不可用，回退到 local: %s", e)
 
         return _create_local(session_id=session_id, cwd=cwd, timeout=timeout)
 

@@ -101,11 +101,7 @@ class FakeShell:
         """记录执行参数并返回预设值。"""
 
         self.calls.append((command, timeout))
-        if (
-            self.raise_timeout_type_error
-            and timeout is not None
-            and not self._raised_timeout_error
-        ):
+        if self.raise_timeout_type_error and timeout is not None and not self._raised_timeout_error:
             self._raised_timeout_error = True
             raise TypeError("timeout not supported")
         result = self.results.pop(0)

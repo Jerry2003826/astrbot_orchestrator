@@ -85,7 +85,9 @@ def test_agent_template_to_spec_supports_suffix_and_copies_tools(
     assert template.tools == ["sandbox"]
 
 
-def test_agent_template_library_updates_existing_templates_ignores_invalid_entries_and_exports() -> None:
+def test_agent_template_library_updates_existing_templates_ignores_invalid_entries_and_exports() -> (
+    None
+):
     """模板库应支持更新内置模板、忽略非法 override 并导出配置。"""
 
     library = AgentTemplateLibrary(

@@ -79,27 +79,27 @@ class RuntimeContainer:
         """获取插件的项目存储目录（在插件目录下的 projects 文件夹）。"""
         import os
         from pathlib import Path
-        
+
         # 尝试获取插件目录
         # 方法1: 从 context 获取
         plugin_dir = None
-        if hasattr(self.context, 'get_plugin_data_dir'):
+        if hasattr(self.context, "get_plugin_data_dir"):
             try:
                 plugin_dir = self.context.get_plugin_data_dir()
             except Exception:
                 pass
-        
+
         # 方法2: 使用 AstrBot 的 data/plugins 目录
         if not plugin_dir:
             # 获取当前文件所在目录，向上找到插件根目录
             current_file = Path(__file__).resolve()
             plugin_root = current_file.parent.parent  # astrbot_orchestrator_v5 目录
             plugin_dir = str(plugin_root)
-        
+
         # 创建 projects 子目录
         projects_dir = os.path.join(str(plugin_dir), "projects")
         os.makedirs(projects_dir, exist_ok=True)
-        
+
         logger.info("插件项目目录: %s", projects_dir)
         return projects_dir
 

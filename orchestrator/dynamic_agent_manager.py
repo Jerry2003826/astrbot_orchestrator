@@ -50,7 +50,7 @@ class DynamicAgentManager:
             provider = self.config.get("llm_provider")
             if provider:
                 return cast(str, provider)
-        
+
         # 从插件配置文件获取
         try:
             with open(PLUGIN_CONFIG_PATH, "r", encoding="utf-8-sig") as f:
@@ -60,7 +60,7 @@ class DynamicAgentManager:
                 return cast(str, provider)
         except Exception as exc:
             logger.warning("读取 orchestrator 插件配置失败: %s", exc)
-        
+
         # 默认值
         return "openai_1/qwen-max-latest"
 
@@ -112,10 +112,10 @@ class DynamicAgentManager:
                 with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
                     cfg = cast(dict[str, Any], json.load(f))
                 subagent_cfg = cast(dict[str, Any], cfg.get("subagent_orchestrator", {}))
-            
+
             agents = subagent_cfg.get("agents", [])
             if isinstance(agents, list):
-                return [a for a in agents if not a.get('_dynamic_', False)]
+                return [a for a in agents if not a.get("_dynamic_", False)]
         except Exception as e:
             logger.warning("加载配置失败: %s", e)
         return []
@@ -124,7 +124,7 @@ class DynamicAgentManager:
         """创建动态 agents 并持久化到配置"""
         created: list[AgentSpec] = []
         name_counts: dict[str, int] = {}
-        
+
         # 获取默认 provider_id
         default_provider = self._get_default_provider_id()
 
@@ -132,7 +132,7 @@ class DynamicAgentManager:
             # 自动设置 provider_id
             if not spec.provider_id:
                 spec.provider_id = default_provider
-            
+
             name_counts.setdefault(spec.name, 0)
             name_counts[spec.name] += 1
             if name_counts[spec.name] > 1:
@@ -155,7 +155,7 @@ class DynamicAgentManager:
         # 持久化到配置文件并重新加载
         await self._save_to_config()
         await self._reload_subagents()
-        
+
         logger.info("动态 SubAgent 创建完成并已保存: %s", [a.name for a in created])
         return created
 
@@ -163,11 +163,11 @@ class DynamicAgentManager:
         """清理动态 agents（可选，用户可以在 UI 中手动管理）"""
         agent_ids = [spec.agent_id for spec in specs]
         agent_names = {spec.name for spec in specs}
-        
+
         for spec in specs:
             self._dynamic_agents.pop(spec.agent_id, None)
             self.registry.remove(spec.agent_id)
-        
+
         # 从配置文件中移除
         await self._remove_from_config(agent_ids, names_to_remove=agent_names)
         await self._reload_subagents()
@@ -200,14 +200,14 @@ class DynamicAgentManager:
         try:
             # 尝试获取内存中的配置对象
             astrbot_config = self._get_astrbot_config()
-            
+
             if astrbot_config is not None:
                 # 方案A: 通过内存配置对象更新（WebUI 实时可见）
                 await self._save_to_memory_config(astrbot_config)
             else:
                 # 方案B: 直接写文件（备选）
                 await self._save_to_file_config()
-                
+
         except Exception as e:
             logger.error("保存 SubAgent 配置失败: %s", e, exc_info=True)
 
@@ -216,16 +216,16 @@ class DynamicAgentManager:
         # 获取或创建 subagent_orchestrator 配置
         if "subagent_orchestrator" not in astrbot_config:
             astrbot_config["subagent_orchestrator"] = {"main_enable": True, "agents": []}
-        
+
         subagent_config = astrbot_config["subagent_orchestrator"]
         if "agents" not in subagent_config:
             subagent_config["agents"] = []
-        
+
         existing_agents = subagent_config["agents"]
-        
+
         # 保留非动态的 agents，移除旧的动态 agents
         existing_agents = [a for a in existing_agents if not a.get("_dynamic_", False)]
-        
+
         # 添加新的动态 agents
         for spec in self._dynamic_agents.values():
             agent_config = spec.to_config()
@@ -233,13 +233,15 @@ class DynamicAgentManager:
             agent_config["enabled"] = True
             agent_config["_created_at_"] = _utcnow().isoformat()
             existing_agents.append(agent_config)
-        
+
         subagent_config["agents"] = existing_agents
-        
+
         # 同步保存到文件
         if hasattr(astrbot_config, "save_config"):
             astrbot_config.save_config()
-            logger.info("动态 SubAgents 已保存到内存配置和文件 (共 %d 个)", len(self._dynamic_agents))
+            logger.info(
+                "动态 SubAgents 已保存到内存配置和文件 (共 %d 个)", len(self._dynamic_agents)
+            )
         else:
             # 如果没有 save_config 方法，手动写文件
             await self._save_to_file_config()
@@ -248,29 +250,29 @@ class DynamicAgentManager:
         """直接写入配置文件（备选方案）"""
         with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
             config = cast(dict[str, Any], json.load(f))
-        
+
         if "subagent_orchestrator" not in config:
             config["subagent_orchestrator"] = {"main_enable": True, "agents": []}
-        
+
         subagent_config = config["subagent_orchestrator"]
         if "agents" not in subagent_config:
             subagent_config["agents"] = []
-        
+
         existing_agents = subagent_config["agents"]
         existing_agents = [a for a in existing_agents if not a.get("_dynamic_", False)]
-        
+
         for spec in self._dynamic_agents.values():
             agent_config = spec.to_config()
             agent_config["_dynamic_"] = True
             agent_config["enabled"] = True
             agent_config["_created_at_"] = _utcnow().isoformat()
             existing_agents.append(agent_config)
-        
+
         subagent_config["agents"] = existing_agents
-        
+
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        
+
         logger.info("动态 SubAgents 已保存到配置文件 (共 %d 个)", len(self._dynamic_agents))
 
     async def _remove_from_config(
@@ -286,44 +288,42 @@ class DynamicAgentManager:
                 spec = self._dynamic_agents.get(aid)
                 if spec:
                     pending_names.add(spec.name)
-            
+
             if not pending_names:
                 return
-            
+
             # 尝试通过内存配置更新
             astrbot_config = self._get_astrbot_config()
-            
+
             if astrbot_config is not None and "subagent_orchestrator" in astrbot_config:
                 subagent_config = astrbot_config["subagent_orchestrator"]
                 if "agents" in subagent_config:
                     subagent_config["agents"] = [
-                        a for a in subagent_config["agents"]
-                        if a.get("name") not in pending_names
+                        a for a in subagent_config["agents"] if a.get("name") not in pending_names
                     ]
                     if hasattr(astrbot_config, "save_config"):
                         astrbot_config.save_config()
                         logger.info("已从内存配置和文件中移除 SubAgents: %s", pending_names)
                         return
-            
+
             # 备选：直接操作文件
             with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
                 config = cast(dict[str, Any], json.load(f))
-            
+
             if "subagent_orchestrator" not in config:
                 return
-            
+
             subagent_config = config["subagent_orchestrator"]
             if "agents" not in subagent_config:
                 return
-            
+
             subagent_config["agents"] = [
-                a for a in subagent_config["agents"]
-                if a.get("name") not in pending_names
+                a for a in subagent_config["agents"] if a.get("name") not in pending_names
             ]
-            
+
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
-            
+
             logger.info("已从配置文件中移除 SubAgents: %s", pending_names)
         except Exception as e:
             logger.error("移除 SubAgent 配置失败: %s", e, exc_info=True)
@@ -338,7 +338,7 @@ class DynamicAgentManager:
         # 优先从内存配置读取
         subagent_config = {}
         astrbot_config = self._get_astrbot_config()
-        
+
         if astrbot_config is not None:
             subagent_config = cast(
                 dict[str, Any],

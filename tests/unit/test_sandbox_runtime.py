@@ -327,9 +327,7 @@ async def test_sandbox_runtime_falls_back_to_local_when_enabled() -> None:
 
     shipyard_sandbox = FakeSandbox(mode="shipyard", start_error=RuntimeError("connect failed"))
     local_sandbox = FakeSandbox(mode="local")
-    factory = FakeSandboxFactory(
-        {"shipyard": [shipyard_sandbox], "local": [local_sandbox]}
-    )
+    factory = FakeSandboxFactory({"shipyard": [shipyard_sandbox], "local": [local_sandbox]})
     runtime = SandboxRuntime(
         context=FakeContext({}),
         config={
@@ -361,10 +359,14 @@ async def test_sandbox_runtime_fallback_or_raise_preserves_mode_specific_errors(
     local_error = RuntimeError("local failed")
 
     with pytest.raises(RuntimeError, match="已拒绝自动回退到本地执行: ship failed"):
-        await runtime._fallback_or_raise("shipyard", event=None, session_id="s1", last_error=shipyard_error)
+        await runtime._fallback_or_raise(
+            "shipyard", event=None, session_id="s1", last_error=shipyard_error
+        )
 
     with pytest.raises(RuntimeError, match="local failed"):
-        await runtime._fallback_or_raise("local", event=None, session_id="s1", last_error=local_error)
+        await runtime._fallback_or_raise(
+            "local", event=None, session_id="s1", last_error=local_error
+        )
 
 
 @pytest.mark.asyncio

@@ -150,7 +150,9 @@ async def test_self_debugger_analyze_error_classifies_common_errors(
 
     debugger = SelfDebugger(context=FakeDebugContext())
 
-    result = await debugger.analyze_error(error=error, traceback_info="", context={"request": "demo"})
+    result = await debugger.analyze_error(
+        error=error, traceback_info="", context={"request": "demo"}
+    )
 
     for fragment in expected_fragments:
         assert fragment in result

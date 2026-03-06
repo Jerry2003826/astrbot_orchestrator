@@ -92,9 +92,7 @@ class RequestContext:
         legacy_context = dict(context or {})
         event = legacy_context.get("event")
         reserved_keys = {"user_id", "session", "umo", "is_admin", "event", "request_id"}
-        metadata = {
-            key: value for key, value in legacy_context.items() if key not in reserved_keys
-        }
+        metadata = {key: value for key, value in legacy_context.items() if key not in reserved_keys}
 
         return cls(
             request_text=user_request,

@@ -436,7 +436,9 @@ def test_dynamic_orchestrator_parse_helpers_and_extractors(
 ) -> None:
     """解析器与文本提取辅助函数应覆盖成功与失败场景。"""
 
-    orchestrator = DynamicOrchestrator(context=fake_context, config={"show_thinking_process": False})
+    orchestrator = DynamicOrchestrator(
+        context=fake_context, config={"show_thinking_process": False}
+    )
 
     payload = orchestrator._parse_intent_payload('{"intent": "reasoning", "params": {}}')
     plan = orchestrator._parse_execution_plan('[{"description": "写文件"}]')
@@ -535,7 +537,9 @@ async def test_dynamic_orchestrator_process_wrappers_delegate_correctly(
 ) -> None:
     """`process_autonomous` 与 `process` 应分别转发到正确入口。"""
 
-    orchestrator = DynamicOrchestrator(context=fake_context, config={"show_thinking_process": False})
+    orchestrator = DynamicOrchestrator(
+        context=fake_context, config={"show_thinking_process": False}
+    )
     captured_contexts: list[RequestContext] = []
 
     async def fake_process_request(request_context: RequestContext) -> dict[str, Any]:
@@ -611,26 +615,41 @@ def test_dynamic_orchestrator_subagent_settings_and_selection_rules(
     assert default_orchestrator.subagent_settings["use_llm_task_analyzer"] is False
 
     assert disabled_orchestrator._should_use_subagents({}, "普通请求") is False
-    assert default_orchestrator._should_use_subagents(
-        {"needs_planning": True},
-        "需要规划",
-    ) is True
-    assert default_orchestrator._should_use_subagents(
-        {"complexity": "medium"},
-        "中等复杂度",
-    ) is True
-    assert default_orchestrator._should_use_subagents(
-        {"intent": "code_project"},
-        "写项目",
-    ) is True
-    assert default_orchestrator._should_use_subagents(
-        {"intent": "reasoning"},
-        "普通问题",
-    ) is False
-    assert custom_orchestrator._should_use_subagents(
-        {"intent": "reasoning"},
-        "请并行处理多个子代理任务",
-    ) is True
+    assert (
+        default_orchestrator._should_use_subagents(
+            {"needs_planning": True},
+            "需要规划",
+        )
+        is True
+    )
+    assert (
+        default_orchestrator._should_use_subagents(
+            {"complexity": "medium"},
+            "中等复杂度",
+        )
+        is True
+    )
+    assert (
+        default_orchestrator._should_use_subagents(
+            {"intent": "code_project"},
+            "写项目",
+        )
+        is True
+    )
+    assert (
+        default_orchestrator._should_use_subagents(
+            {"intent": "reasoning"},
+            "普通问题",
+        )
+        is False
+    )
+    assert (
+        custom_orchestrator._should_use_subagents(
+            {"intent": "reasoning"},
+            "请并行处理多个子代理任务",
+        )
+        is True
+    )
 
 
 @pytest.mark.asyncio
@@ -639,7 +658,9 @@ async def test_dynamic_orchestrator_intent_and_plan_pipelines_handle_success_and
 ) -> None:
     """意图与计划管道应正确处理成功调用和异常回退。"""
 
-    orchestrator = DynamicOrchestrator(context=fake_context, config={"show_thinking_process": False})
+    orchestrator = DynamicOrchestrator(
+        context=fake_context, config={"show_thinking_process": False}
+    )
     intent_pipeline = FakePipeline(result={"intent": "debug"})
     plan_pipeline = FakePipeline(
         result=[
@@ -657,7 +678,9 @@ async def test_dynamic_orchestrator_intent_and_plan_pipelines_handle_success_and
     intent = await orchestrator._analyze_intent_enhanced("分析请求", "provider-a")
     plan = await orchestrator._generate_execution_plan(
         request="创建项目",
-        intent={"params": {"project_name": "demo", "tech_stack": ["python", "flask"], "features": []}},
+        intent={
+            "params": {"project_name": "demo", "tech_stack": ["python", "flask"], "features": []}
+        },
         provider_id="provider-b",
     )
 
@@ -702,7 +725,9 @@ async def test_dynamic_orchestrator_execute_plan_handles_skipped_failed_and_unkn
 ) -> None:
     """计划执行应覆盖 skipped、failed 与未知操作分支。"""
 
-    orchestrator = DynamicOrchestrator(context=fake_context, config={"show_thinking_process": False})
+    orchestrator = DynamicOrchestrator(
+        context=fake_context, config={"show_thinking_process": False}
+    )
     logs: list[str] = []
     plan = [
         ExecutionStep(
@@ -800,9 +825,7 @@ async def test_dynamic_orchestrator_execute_plan_handles_execute_failures_and_au
     assert "❌ 步骤 1: 缺少命令" in result["answer"]
     assert "❌ 步骤 2: 命令返回失败" in result["answer"]
 
-    crashing_plan = [
-        ExecutionStep(step_num=3, action="execute", description="抛异常", code="boom")
-    ]
+    crashing_plan = [ExecutionStep(step_num=3, action="execute", description="抛异常", code="boom")]
 
     async def raising_execute_command(code: str, event: Any) -> str:
         """模拟命令执行直接抛错。"""
@@ -857,7 +880,9 @@ async def test_dynamic_orchestrator_execute_plan_ignores_auto_fix_errors(
         del event
         raise RuntimeError("exec boom")
 
-    async def failing_auto_fix(error: Exception, step: ExecutionStep, provider_id: str) -> str | None:
+    async def failing_auto_fix(
+        error: Exception, step: ExecutionStep, provider_id: str
+    ) -> str | None:
         """模拟自动修复阶段再次抛错。"""
 
         del error
@@ -890,7 +915,9 @@ async def test_dynamic_orchestrator_execute_create_file_and_helpers_cover_error_
 ) -> None:
     """文件创建与执行辅助函数应覆盖边界与异常路径。"""
 
-    orchestrator = DynamicOrchestrator(context=fake_context, config={"show_thinking_process": False})
+    orchestrator = DynamicOrchestrator(
+        context=fake_context, config={"show_thinking_process": False}
+    )
     orchestrator.projects_dir = str(tmp_path)
 
     no_admin = await orchestrator._execute_create_file(
@@ -928,11 +955,14 @@ async def test_dynamic_orchestrator_execute_create_file_and_helpers_cover_error_
     assert missing_fields == "❌ 缺少文件路径或代码"
     assert io_error == "❌ 创建文件失败: disk full"
     assert await orchestrator._execute_command("echo hi", object()) == "❌ 执行器不可用"
-    assert await orchestrator._auto_fix_error(
-        RuntimeError("boom"),
-        ExecutionStep(step_num=4, action="execute", description="step", code="print(1)"),
-        "provider-x",
-    ) is None
+    assert (
+        await orchestrator._auto_fix_error(
+            RuntimeError("boom"),
+            ExecutionStep(step_num=4, action="execute", description="step", code="print(1)"),
+            "provider-x",
+        )
+        is None
+    )
 
     executor = FakeExecutor(execute_result="shell-ok")
     debugger = FakeDebugger("fixed")
@@ -940,11 +970,14 @@ async def test_dynamic_orchestrator_execute_create_file_and_helpers_cover_error_
     orchestrator.debugger = debugger
 
     assert await orchestrator._execute_command("echo hi", "evt") == "shell-ok"
-    assert await orchestrator._auto_fix_error(
-        RuntimeError("boom"),
-        ExecutionStep(step_num=5, action="execute", description="修复步骤", code="print(2)"),
-        "provider-y",
-    ) == "fixed"
+    assert (
+        await orchestrator._auto_fix_error(
+            RuntimeError("boom"),
+            ExecutionStep(step_num=5, action="execute", description="修复步骤", code="print(2)"),
+            "provider-y",
+        )
+        == "fixed"
+    )
     assert executor.execute_calls == [("echo hi", "evt")]
     assert debugger.calls[0]["context"]["step"] == "修复步骤"
 
@@ -992,8 +1025,12 @@ async def test_dynamic_orchestrator_handlers_cover_success_and_failure_paths(
         "provider-x",
         True,
     )
-    create_denied = await orchestrator._handle_create_skill({}, '创建 "Hello Skill"', "provider-x", False)
-    create_success = await orchestrator._handle_create_skill({}, '创建 "Hello Skill"', "provider-x", True)
+    create_denied = await orchestrator._handle_create_skill(
+        {}, '创建 "Hello Skill"', "provider-x", False
+    )
+    create_success = await orchestrator._handle_create_skill(
+        {}, '创建 "Hello Skill"', "provider-x", True
+    )
     create_failed = await DynamicOrchestrator(
         context=fake_context,
         skill_tool=FakeSkillTool(create_error=RuntimeError("create boom")),
@@ -1060,7 +1097,9 @@ async def test_dynamic_orchestrator_execute_by_intent_routes_to_project_execute_
 ) -> None:
     """按意图分发时应覆盖项目、执行、调试与默认推理路径。"""
 
-    orchestrator = DynamicOrchestrator(context=fake_context, config={"show_thinking_process": False})
+    orchestrator = DynamicOrchestrator(
+        context=fake_context, config={"show_thinking_process": False}
+    )
     plan_calls: list[tuple[str, dict[str, Any], str]] = []
     execute_plan_calls: list[dict[str, Any]] = []
     execute_code_calls: list[tuple[dict[str, Any], str, Any, bool]] = []
@@ -1178,7 +1217,9 @@ async def test_dynamic_orchestrator_execute_by_intent_routes_plugin_install_and_
 ) -> None:
     """按意图分发时应命中插件搜索、安装与 Skill 创建分支。"""
 
-    orchestrator = DynamicOrchestrator(context=fake_context, config={"show_thinking_process": False})
+    orchestrator = DynamicOrchestrator(
+        context=fake_context, config={"show_thinking_process": False}
+    )
     search_calls: list[tuple[dict[str, Any], str, str]] = []
     install_calls: list[tuple[dict[str, Any], str, str, bool]] = []
     skill_calls: list[tuple[dict[str, Any], str, str, bool]] = []
@@ -1254,7 +1295,9 @@ def test_dynamic_orchestrator_extract_code_handles_unclosed_or_empty_markup(
 ) -> None:
     """未闭合或空代码标记不应被误识别为可执行代码。"""
 
-    orchestrator = DynamicOrchestrator(context=fake_context, config={"show_thinking_process": False})
+    orchestrator = DynamicOrchestrator(
+        context=fake_context, config={"show_thinking_process": False}
+    )
 
     assert orchestrator._extract_code("```broken") == ""
     assert orchestrator._extract_code("这里只有反引号 `") == ""

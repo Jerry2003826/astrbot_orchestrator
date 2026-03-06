@@ -186,11 +186,7 @@ async def test_local_sandbox_stream_exec_emits_stdout_stderr_and_status(tmp_path
     """流式执行应依次产出 stdout、stderr 与状态块。"""
 
     sandbox = LocalSandbox(cwd=str(tmp_path))
-    code = (
-        "import sys\n"
-        "print('out-line')\n"
-        "print('err-line', file=sys.stderr)\n"
-    )
+    code = "import sys\nprint('out-line')\nprint('err-line', file=sys.stderr)\n"
 
     chunks = await collect_chunks(sandbox.astream_exec(code))
 

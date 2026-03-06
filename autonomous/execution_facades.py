@@ -270,12 +270,7 @@ class LegacyExecutionFacade:
             await self.api_client.run_code(command, event=event, kernel="bash")
         except Exception as exc:
             return f"❌ 启动失败: {str(exc)}"
-        return (
-            f"🚀 **服务启动中...**\n\n"
-            f"项目: `{project_path}`\n"
-            f"端口: {port}\n"
-            f"框架: {framework}"
-        )
+        return f"🚀 **服务启动中...**\n\n项目: `{project_path}`\n端口: {port}\n框架: {framework}"
 
     async def healthcheck(self, event: Any = None) -> str:
         """返回当前沙盒健康状态。"""

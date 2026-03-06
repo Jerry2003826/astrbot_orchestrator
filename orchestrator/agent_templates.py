@@ -87,9 +87,7 @@ class AgentTemplateLibrary:
             "research": AgentTemplate(
                 role="research",
                 name="research_agent",
-                system_prompt=(
-                    "你是信息分析专家，擅长梳理需求、总结方案和关键风险。"
-                ),
+                system_prompt=("你是信息分析专家，擅长梳理需求、总结方案和关键风险。"),
                 public_description="分析需求和风险的子代理",
             ),
             "deploy": AgentTemplate(
@@ -104,9 +102,7 @@ class AgentTemplateLibrary:
             "debug": AgentTemplate(
                 role="debug",
                 name="debug_agent",
-                system_prompt=(
-                    "你是调试专家，负责定位问题原因并给出修复建议。"
-                ),
+                system_prompt=("你是调试专家，负责定位问题原因并给出修复建议。"),
                 public_description="排查问题并提出修复方案的子代理",
                 tools=["sandbox"],
             ),

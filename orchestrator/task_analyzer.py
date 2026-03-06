@@ -67,7 +67,9 @@ class TaskAnalyzer:
         if use_llm:
             try:
                 plan = await self._analyze_with_llm(request, provider_id)
-                logger.info("LLM 任务分析完成: agents=%d, tasks=%d", len(plan.agents), len(plan.tasks))
+                logger.info(
+                    "LLM 任务分析完成: agents=%d, tasks=%d", len(plan.agents), len(plan.tasks)
+                )
                 # 后处理：修正错误的 action 分配
                 plan = self._postprocess_plan(plan, request)
                 return plan
@@ -148,9 +150,26 @@ class TaskAnalyzer:
         """后处理任务计划：修正 LLM 可能错误分配的 action"""
         # 检测是否是代码生成类请求
         code_gen_keywords = [
-            "写", "创建", "开发", "实现", "生成", "做一个", "帮我",
-            "程序", "项目", "应用", "小程序", "网站", "网页", "API",
-            "app", "write", "create", "build", "develop", "implement",
+            "写",
+            "创建",
+            "开发",
+            "实现",
+            "生成",
+            "做一个",
+            "帮我",
+            "程序",
+            "项目",
+            "应用",
+            "小程序",
+            "网站",
+            "网页",
+            "API",
+            "app",
+            "write",
+            "create",
+            "build",
+            "develop",
+            "implement",
         ]
         is_code_gen_request = any(kw in request.lower() for kw in code_gen_keywords)
 
@@ -195,12 +214,12 @@ class TaskAnalyzer:
 
         # 典型的 shell 命令特征
         shell_patterns = [
-            r'^(pip|npm|yarn|apt|brew|cargo|go|git|docker|kubectl|curl|wget|cat|ls|cd|mkdir|cp|mv|rm|echo|find|grep|sed|awk|tar|zip|unzip)\s',
-            r'^(python|python3|node|java|gcc|g\+\+|make|cmake)\s',
-            r'^(sudo|nohup|chmod|chown|export|source|\.\/)',
-            r'^\w+=',  # 环境变量赋值
-            r'^\|',    # 管道
-            r'^#!',    # shebang
+            r"^(pip|npm|yarn|apt|brew|cargo|go|git|docker|kubectl|curl|wget|cat|ls|cd|mkdir|cp|mv|rm|echo|find|grep|sed|awk|tar|zip|unzip)\s",
+            r"^(python|python3|node|java|gcc|g\+\+|make|cmake)\s",
+            r"^(sudo|nohup|chmod|chown|export|source|\.\/)",
+            r"^\w+=",  # 环境变量赋值
+            r"^\|",  # 管道
+            r"^#!",  # shebang
         ]
 
         for pattern in shell_patterns:
@@ -208,8 +227,8 @@ class TaskAnalyzer:
                 return False
 
         # 自然语言特征：包含中文字符、长度较长、包含标点
-        has_chinese = bool(re.search(r'[\u4e00-\u9fff]', text))
-        has_punctuation = bool(re.search(r'[，。！？；：、]', text))
+        has_chinese = bool(re.search(r"[\u4e00-\u9fff]", text))
+        has_punctuation = bool(re.search(r"[，。！？；：、]", text))
         word_count = len(text.split())
 
         # 如果包含中文或标点，很可能是自然语言
@@ -217,7 +236,7 @@ class TaskAnalyzer:
             return True
 
         # 如果英文单词数超过 10 且不含典型命令字符，可能是自然语言
-        if word_count > 10 and not any(c in text for c in ['|', '>', '<', '&&', '||', ';']):
+        if word_count > 10 and not any(c in text for c in ["|", ">", "<", "&&", "||", ";"]):
             return True
 
         return False
@@ -244,7 +263,7 @@ class TaskAnalyzer:
         for item in tasks_data:
             tasks.append(
                 AgentTask(
-                    task_id=item.get("id", f"task_{len(tasks)+1}"),
+                    task_id=item.get("id", f"task_{len(tasks) + 1}"),
                     description=item.get("description", ""),
                     agent_role=item.get("agent_role", "code"),
                     action=item.get("action", "llm"),
@@ -272,7 +291,9 @@ class TaskAnalyzer:
         def add_agent(role: str) -> None:
             agents.append(self.templates.build_spec(role=role))
 
-        def add_task(task_id: str, description: str, role: str, action: str, input_text: str, deps=None):
+        def add_task(
+            task_id: str, description: str, role: str, action: str, input_text: str, deps=None
+        ):
             tasks.append(
                 AgentTask(
                     task_id=task_id,

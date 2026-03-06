@@ -39,9 +39,7 @@ def test_orchestrator_getattr_returns_cached_export_and_dir_lists_symbols(
     monkeypatch.setattr(
         orchestrator_pkg,
         "import_module",
-        lambda module_name, package_name: SimpleNamespace(
-            AgentCapabilityBuilder=exported_value
-        ),
+        lambda module_name, package_name: SimpleNamespace(AgentCapabilityBuilder=exported_value),
     )
 
     value = orchestrator_pkg.__getattr__("AgentCapabilityBuilder")

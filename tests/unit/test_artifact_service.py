@@ -95,10 +95,12 @@ def test_artifact_service_extracts_files_from_result_and_persists(tmp_path: Path
     }
     assert persisted["success"] is True
     assert persisted["saved_files"] == ["app.py", "assets/site.css"]
-    assert (tmp_path / "demo_project" / "app.py").read_text(encoding="utf-8") == "print('from task output')"
-    assert (
-        tmp_path / "demo_project" / "assets" / "site.css"
-    ).read_text(encoding="utf-8") == "body { color: #333; }"
+    assert (tmp_path / "demo_project" / "app.py").read_text(
+        encoding="utf-8"
+    ) == "print('from task output')"
+    assert (tmp_path / "demo_project" / "assets" / "site.css").read_text(
+        encoding="utf-8"
+    ) == "body { color: #333; }"
 
 
 def test_artifact_service_persist_result_handles_empty_and_plain_text(tmp_path: Path) -> None:
@@ -273,9 +275,9 @@ async def test_artifact_service_writes_output_to_workspace(tmp_path: Path) -> No
     executor = FakeExecutor()
 
     created_files = await service.write_output_to_workspace(
-        output_text='''```python:main.py
+        output_text="""```python:main.py
 print("ok")
-```''',
+```""",
         executor=executor,
         event=object(),
         project_name="Demo Project",
@@ -340,7 +342,9 @@ async def test_artifact_service_export_sandbox_files_uses_scan_results_and_skips
 
     assert result["success"] is True
     assert result["saved_files"] == ["src/app.py"]
-    assert (tmp_path / "demo_project" / "src" / "app.py").read_text(encoding="utf-8") == "print('ok')"
+    assert (tmp_path / "demo_project" / "src" / "app.py").read_text(
+        encoding="utf-8"
+    ) == "print('ok')"
 
 
 @pytest.mark.asyncio
@@ -377,7 +381,9 @@ async def test_artifact_service_export_sandbox_files_falls_back_to_created_files
 
     assert result["success"] is True
     assert result["saved_files"] == ["main.py"]
-    assert (tmp_path / "demo_project" / "main.py").read_text(encoding="utf-8") == "print('fallback')"
+    assert (tmp_path / "demo_project" / "main.py").read_text(
+        encoding="utf-8"
+    ) == "print('fallback')"
     assert not (tmp_path / "demo_project" / "escape.py").exists()
 
 
@@ -385,9 +391,7 @@ async def test_artifact_service_export_sandbox_files_falls_back_to_created_files
 async def test_artifact_service_export_sandbox_files_handles_scan_failure(tmp_path: Path) -> None:
     """扫描沙盒失败时应记录错误并返回空导出结果。"""
 
-    sandbox = FakeSandbox(
-        command_results={LIST_SANDBOX_FILES_COMMAND: RuntimeError("scan failed")}
-    )
+    sandbox = FakeSandbox(command_results={LIST_SANDBOX_FILES_COMMAND: RuntimeError("scan failed")})
     service = ArtifactService(persist_dir=str(tmp_path))
     executor = FakeSandboxExecutor(sandbox=sandbox)
 

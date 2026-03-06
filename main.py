@@ -42,12 +42,12 @@ logger = logging.getLogger(__name__)
     name="astrbot_orchestrator",
     desc="全自主智能体编排器 - 通过聊天完成所有操作（CodeSandbox 增强版）",
     version="3.0.0",
-    author="lijiarui"
+    author="lijiarui",
 )
 class OrchestratorPlugin(Star):
     """
     AstrBot 全自主智能体编排器
-    
+
     核心能力：
     - 🔍 搜索插件市场，自动安装插件
     - ✍️ 动态创建/编辑 Skill
@@ -55,7 +55,7 @@ class OrchestratorPlugin(Star):
     - 🐛 自我诊断和 Debug
     - 🖥️ 选择 local/sandbox 执行环境
     """
-    
+
     def __init__(
         self,
         context: Context,
@@ -64,9 +64,9 @@ class OrchestratorPlugin(Star):
         """初始化插件入口及其运行时占位属性。"""
 
         super().__init__(context)
-        
+
         self.config = config or AstrBotConfig()
-        
+
         # 核心组件
         self.orchestrator: DynamicOrchestrator = None
         self.meta_orchestrator: MetaOrchestrator = None
@@ -77,7 +77,7 @@ class OrchestratorPlugin(Star):
         self.task_analyzer: TaskAnalyzer = None
         self.agent_coordinator: AgentCoordinator = None
         self.capability_builder: AgentCapabilityBuilder = None
-        
+
         # 自主能力组件
         self.plugin_tool: PluginManagerTool = None
         self.skill_tool: SkillCreatorTool = None
@@ -86,7 +86,7 @@ class OrchestratorPlugin(Star):
         self.executor: ExecutionManager = None
         self.runtime: RuntimeContainer | None = None
         self.command_handlers: CommandHandlers | None = None
-        
+
         self._initialized = False
 
     def _bind_runtime_components(self, runtime: RuntimeContainer) -> None:
@@ -117,12 +117,12 @@ class OrchestratorPlugin(Star):
         if self.command_handlers is None:
             raise RuntimeError("命令处理器未初始化")
         return self.command_handlers
-    
+
     async def initialize(self) -> None:
         """插件初始化"""
         if self._initialized:
             return
-        
+
         logger.info("初始化全自主智能体编排器...")
         self.runtime = RuntimeContainer.build(self.context, self.config)
         self._bind_runtime_components(self.runtime)
@@ -131,22 +131,24 @@ class OrchestratorPlugin(Star):
             runtime=self.runtime,
             build_request_context=self._build_request_context,
         )
-        
+
         self._initialized = True
-        
+
         # 调试日志：检查配置
         logger.info("全自主智能体编排器初始化完成")
-        logger.info("配置检查: enable_dynamic_agents=%s, force_subagents=%s",
-                    self.config.get("enable_dynamic_agents"),
-                    self.config.get("force_subagents_for_complex_tasks"))
-    
+        logger.info(
+            "配置检查: enable_dynamic_agents=%s, force_subagents=%s",
+            self.config.get("enable_dynamic_agents"),
+            self.config.get("force_subagents_for_complex_tasks"),
+        )
+
     @filter.command("agent")
     async def handle_agent(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
         """
         全自主 Agent - 可以执行任何操作
-        
+
         用法: /agent <任务描述>
-        
+
         示例:
         - /agent 帮我搜索有什么好用的翻译插件
         - /agent 帮我写一个查询天气的 Skill
@@ -158,12 +160,12 @@ class OrchestratorPlugin(Star):
         handlers = self._get_command_handlers()
         async for result in handlers.handle_agent(event):
             yield result
-    
+
     @filter.command("plugin")
     async def handle_plugin(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
         """
         插件管理
-        
+
         用法:
         - /plugin search <关键词>   搜索插件市场
         - /plugin install <url>     安装插件（自动使用 GitHub 加速）
@@ -176,12 +178,12 @@ class OrchestratorPlugin(Star):
         handlers = self._get_command_handlers()
         async for result in handlers.handle_plugin(event):
             yield result
-    
+
     @filter.command("skill")
     async def handle_skill(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
         """
         Skill 管理
-        
+
         用法:
         - /skill list                列出所有 Skill
         - /skill create <名称>       创建新 Skill（交互式）
@@ -193,12 +195,12 @@ class OrchestratorPlugin(Star):
         handlers = self._get_command_handlers()
         async for result in handlers.handle_skill(event):
             yield result
-    
+
     @filter.command("mcp")
     async def handle_mcp(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
         """
         MCP 配置管理
-        
+
         用法:
         - /mcp list                  列出所有 MCP 服务
         - /mcp add <名称> <url>      添加 MCP 服务
@@ -210,12 +212,12 @@ class OrchestratorPlugin(Star):
         handlers = self._get_command_handlers()
         async for result in handlers.handle_mcp(event):
             yield result
-    
+
     @filter.command("exec")
     async def handle_exec(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
         """
         执行代码/命令（使用 AstrBot 全局沙盒配置）
-        
+
         用法:
         - /exec <命令>             使用全局配置执行
         - /exec local <命令>       强制本地执行
@@ -227,12 +229,12 @@ class OrchestratorPlugin(Star):
         handlers = self._get_command_handlers()
         async for result in handlers.handle_exec(event):
             yield result
-    
+
     @filter.command("debug")
     async def handle_debug(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
         """
         自我诊断和 Debug
-        
+
         用法:
         - /debug status        查看系统状态
         - /debug logs          查看最近错误日志
@@ -242,12 +244,12 @@ class OrchestratorPlugin(Star):
         handlers = self._get_command_handlers()
         async for result in handlers.handle_debug(event):
             yield result
-    
+
     @filter.command("sandbox")
     async def handle_sandbox(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
         """
         CodeSandbox 沙盒管理（类似 CodeBox API）
-        
+
         用法:
         - /sandbox status              沙盒健康状态
         - /sandbox exec <代码>         执行 Python 代码
@@ -265,7 +267,7 @@ class OrchestratorPlugin(Star):
         handlers = self._get_command_handlers()
         async for result in handlers.handle_sandbox(event):
             yield result
-    
+
     async def terminate(self) -> None:
         """插件停用时清理沙盒资源"""
         if self.runtime is not None:

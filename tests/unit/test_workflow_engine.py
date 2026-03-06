@@ -293,9 +293,7 @@ async def test_workflow_engine_executes_skill_and_mcp_nodes() -> None:
     assert state.status == NodeStatus.COMPLETED
     assert state.variables["skill_weather"] == "晴天"
     assert state.variables["tool_result"] == {"ok": True, "source": "mcp"}
-    assert mcp_bridge.calls == [
-        ("search_weather", {"content": "晴天", "city": "北京"})
-    ]
+    assert mcp_bridge.calls == [("search_weather", {"content": "晴天", "city": "北京"})]
 
 
 @pytest.mark.asyncio

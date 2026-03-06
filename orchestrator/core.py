@@ -38,6 +38,7 @@ class TaskStatus(Enum):
 
 class TaskType(Enum):
     """任务类型"""
+
     REASONING = "reasoning"
     SEARCH_PLUGIN = "search_plugin"
     INSTALL_PLUGIN = "install_plugin"
@@ -57,6 +58,7 @@ class TaskType(Enum):
 @dataclass
 class Task:
     """任务定义"""
+
     id: str
     description: str
     type: TaskType = TaskType.GENERAL
@@ -71,6 +73,7 @@ class Task:
 @dataclass
 class ExecutionStep:
     """执行步骤"""
+
     step_num: int
     action: str
     description: str
@@ -83,14 +86,14 @@ class ExecutionStep:
 class DynamicOrchestrator:
     """
     动态智能体编排器 - 增强版
-    
+
     核心能力：
     - 🧠 智能任务分析和多步骤规划
     - 💻 真正的代码生成（完整可运行代码）
     - 🌐 网页应用创建与部署
     - 🔄 自主迭代和错误修复
     """
-    
+
     def __init__(
         self,
         context,
@@ -103,27 +106,27 @@ class DynamicOrchestrator:
         debugger=None,
         executor=None,
         meta_orchestrator=None,
-        config: Optional[Dict] = None
+        config: Optional[Dict] = None,
     ):
         self.context = context
         self.skill_loader = skill_loader
         self.mcp_bridge = mcp_bridge
         self.workflow_engine = workflow_engine
-        
+
         self.plugin_tool = plugin_tool
         self.skill_tool = skill_tool
         self.mcp_tool = mcp_tool
         self.debugger = debugger
         self.executor = executor
         self.meta_orchestrator = meta_orchestrator
-        
+
         self.config = config or {}
         self.max_iterations = self.config.get("max_iterations", 10)
         self.subagent_settings = self._get_subagent_settings()
         self.intent_pipeline = self._build_intent_pipeline()
         self.plan_pipeline = self._build_plan_pipeline()
         self.reasoning_pipeline = self._build_reasoning_pipeline()
-        
+
         # 项目目录 - 使用 context 传递的路径，或从 ArtifactService 获取
         self.projects_dir = self._get_projects_dir()
 
@@ -131,19 +134,19 @@ class DynamicOrchestrator:
         """获取项目存储目录。"""
         import os
         from pathlib import Path
-        
+
         # 优先从 meta_orchestrator 的 artifact_service 获取
-        if self.meta_orchestrator and hasattr(self.meta_orchestrator, 'artifact_service'):
+        if self.meta_orchestrator and hasattr(self.meta_orchestrator, "artifact_service"):
             artifact_service = self.meta_orchestrator.artifact_service
-            if artifact_service and hasattr(artifact_service, 'persist_dir'):
+            if artifact_service and hasattr(artifact_service, "persist_dir"):
                 return artifact_service.persist_dir
-        
+
         # 备选：从当前文件位置推断插件目录
         current_file = Path(__file__).resolve()
         plugin_root = current_file.parent.parent  # astrbot_orchestrator_v5 目录
         projects_dir = os.path.join(str(plugin_root), "projects")
         os.makedirs(projects_dir, exist_ok=True)
-        
+
         return projects_dir
 
     async def _run_model_text(
@@ -332,7 +335,9 @@ class DynamicOrchestrator:
 
         logger.info("SubAgent 设置: %s", self.subagent_settings)
         should_use = self._should_use_subagents(state.intent, state.request_text)
-        logger.info("_should_use_subagents 返回: %s (intent=%s)", should_use, state.intent.get("intent"))
+        logger.info(
+            "_should_use_subagents 返回: %s (intent=%s)", should_use, state.intent.get("intent")
+        )
 
         if not should_use:
             return False
@@ -466,12 +471,9 @@ class DynamicOrchestrator:
 
         except Exception as error:
             return await self._build_error_result(state, error)
-    
+
     async def process_autonomous(
-        self,
-        user_request: str,
-        provider_id: str,
-        context: Optional[Dict] = None
+        self, user_request: str, provider_id: str, context: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """全自主处理用户请求"""
         request_context = RequestContext.from_legacy(
@@ -510,7 +512,7 @@ class DynamicOrchestrator:
                 return True
         keywords = ["多步", "多个", "协作", "subagent", "子代理", "并行"]
         return any(k in request for k in keywords)
-    
+
     async def _analyze_intent_enhanced(self, request: str, provider_id: str) -> Dict[str, Any]:
         """增强版意图分析 - 识别复杂项目需求"""
         try:
@@ -528,14 +530,11 @@ class DynamicOrchestrator:
                 "needs_planning": False,
                 "params": {},
                 "needs_admin": False,
-                "description": request
+                "description": request,
             }
-    
+
     async def _generate_execution_plan(
-        self,
-        request: str,
-        intent: Dict,
-        provider_id: str
+        self, request: str, intent: Dict, provider_id: str
     ) -> List[ExecutionStep]:
         """生成多步骤执行计划"""
 
@@ -559,12 +558,10 @@ class DynamicOrchestrator:
             )
         except Exception as e:
             logger.error(f"生成执行计划失败: {e}")
-            return [ExecutionStep(
-                step_num=1,
-                action="error",
-                description=f"生成计划失败: {str(e)}"
-            )]
-    
+            return [
+                ExecutionStep(step_num=1, action="error", description=f"生成计划失败: {str(e)}")
+            ]
+
     async def _execute_plan(
         self,
         plan: List[ExecutionStep],
@@ -572,16 +569,16 @@ class DynamicOrchestrator:
         provider_id: str,
         is_admin: bool,
         event,
-        log_step
+        log_step,
     ) -> Dict[str, Any]:
         """执行多步骤计划"""
-        
+
         results = []
         project_path = None
-        
+
         for step in plan:
             log_step(f"📌 步骤 {step.step_num}: {step.description}")
-            
+
             try:
                 if step.action == "create_file":
                     result = await self._execute_create_file(step, event, is_admin=is_admin)
@@ -609,14 +606,20 @@ class DynamicOrchestrator:
                     step.status = "failed"
 
                 step.result = result
-                status_icon = "✅" if step.status == "completed" else "⚠️" if step.status == "skipped" else "❌"
+                status_icon = (
+                    "✅"
+                    if step.status == "completed"
+                    else "⚠️"
+                    if step.status == "skipped"
+                    else "❌"
+                )
                 results.append(f"{status_icon} 步骤 {step.step_num}: {step.description}")
-                
+
             except Exception as e:
                 step.status = "failed"
                 step.result = str(e)
                 results.append(f"❌ 步骤 {step.step_num} 失败: {str(e)}")
-                
+
                 # 尝试自动修复
                 if self.debugger and is_admin:
                     log_step("🔧 尝试自动修复...")
@@ -626,15 +629,15 @@ class DynamicOrchestrator:
                             results.append(f"🔧 已修复: {fix}")
                     except Exception:
                         pass
-        
+
         # 生成总结
         summary = await self._generate_summary(plan, project_path, provider_id)
-        
+
         output = "\n".join(results)
         output += f"\n\n---\n\n{summary}"
-        
+
         return {"status": "success", "answer": output, "project_path": project_path}
-    
+
     async def _execute_create_file(self, step: ExecutionStep, event, is_admin: bool) -> str:
         """执行文件创建"""
         if not is_admin:
@@ -652,46 +655,38 @@ class DynamicOrchestrator:
             return f"❌ 创建文件失败: {str(e)}"
         except Exception as e:
             return f"❌ 创建文件失败: {str(e)}"
-    
+
     async def _execute_command(self, code: str, event) -> str:
         """执行命令"""
         if self.executor:
             return cast(str, await self.executor.execute(code, event))
         return "❌ 执行器不可用"
-    
+
     async def _auto_fix_error(
-        self,
-        error: Exception,
-        step: ExecutionStep,
-        provider_id: str
+        self, error: Exception, step: ExecutionStep, provider_id: str
     ) -> Optional[str]:
         """尝试自动修复错误"""
         if not self.debugger:
             return None
-        
+
         analysis = await self.debugger.analyze_error(
-            error=error,
-            traceback_info="",
-            context={"step": step.description, "code": step.code}
+            error=error, traceback_info="", context={"step": step.description, "code": step.code}
         )
-        
+
         return cast(Optional[str], analysis)
-    
+
     async def _generate_summary(
-        self,
-        plan: List[ExecutionStep],
-        project_path: Optional[str],
-        provider_id: str
+        self, plan: List[ExecutionStep], project_path: Optional[str], provider_id: str
     ) -> str:
         """生成项目总结"""
-        
+
         completed = sum(1 for s in plan if s.status == "completed")
         total = len(plan)
-        
+
         files = [s.file_path for s in plan if s.action == "create_file" and s.file_path]
-        
+
         project_abs_path = f"{self.projects_dir}/{project_path or 'my_project'}"
-        
+
         summary = f"""## 📊 项目创建完成
 
 **执行进度:** {completed}/{total} 步骤完成
@@ -703,7 +698,7 @@ class DynamicOrchestrator:
         for f in files:
             file_abs = os.path.join(self.projects_dir, f)
             summary += f"- `{f}` → 绝对路径: `{file_abs}`\n"
-        
+
         summary += f"""
 **💾 下载说明:**
 文件已保存到 AstrBot 数据目录，可通过以下方式获取：
@@ -714,38 +709,30 @@ class DynamicOrchestrator:
 
 💡 遇到问题? 发送 `/debug analyze 错误描述` 让我帮你分析
 """
-        
+
         return summary
-    
+
     async def _execute_by_intent(
-        self,
-        intent: Dict,
-        user_request: str,
-        provider_id: str,
-        is_admin: bool,
-        event
+        self, intent: Dict, user_request: str, provider_id: str, is_admin: bool, event
     ) -> Dict[str, Any]:
         """根据意图执行操作"""
-        
+
         intent_type = intent.get("intent", "reasoning")
         params = intent.get("params", {})
         needs_admin = intent.get("needs_admin", False)
-        
+
         if needs_admin and not is_admin:
-            return {
-                "status": "error",
-                "answer": "❌ 此操作需要管理员权限"
-            }
-        
+            return {"status": "error", "answer": "❌ 此操作需要管理员权限"}
+
         if intent_type == "search_plugin":
             return await self._handle_search_plugin(params, user_request, provider_id)
-        
+
         elif intent_type == "install_plugin":
             return await self._handle_install_plugin(params, user_request, provider_id, is_admin)
-        
+
         elif intent_type == "create_skill":
             return await self._handle_create_skill(params, user_request, provider_id, is_admin)
-        
+
         elif intent_type in ["code_project", "web_app"]:
             # 对于代码项目，生成计划并执行
             plan = await self._generate_execution_plan(user_request, intent, provider_id)
@@ -755,100 +742,104 @@ class DynamicOrchestrator:
                 provider_id=provider_id,
                 is_admin=is_admin,
                 event=event,
-                log_step=lambda x: logger.info(f"[执行] {x}")
+                log_step=lambda x: logger.info(f"[执行] {x}"),
             )
-        
+
         elif intent_type == "execute_code":
             return await self._handle_execute_code(params, user_request, event, is_admin)
-        
+
         elif intent_type == "debug":
             return await self._handle_debug(params, user_request, provider_id)
-        
+
         else:
             return await self._handle_reasoning(user_request, provider_id)
-    
-    async def _handle_search_plugin(self, params: Dict, request: str, provider_id: str) -> Dict[str, Any]:
+
+    async def _handle_search_plugin(
+        self, params: Dict, request: str, provider_id: str
+    ) -> Dict[str, Any]:
         """处理插件搜索"""
         keyword = params.get("keyword", "")
         if not keyword:
             keyword = self._extract_keyword(request, ["插件", "plugin", "搜索"])
-        
+
         if self.plugin_tool:
             result = await self.plugin_tool.search_plugins(keyword)
             return {"status": "success", "answer": result}
-        
+
         return {"status": "error", "answer": "❌ 插件管理工具不可用"}
-    
-    async def _handle_install_plugin(self, params: Dict, request: str, provider_id: str, is_admin: bool) -> Dict[str, Any]:
+
+    async def _handle_install_plugin(
+        self, params: Dict, request: str, provider_id: str, is_admin: bool
+    ) -> Dict[str, Any]:
         """处理插件安装"""
         if not is_admin:
             return {"status": "error", "answer": "❌ 只有管理员可以安装插件"}
-        
+
         repo_url = params.get("repo_url", "")
         if not repo_url:
-            urls = re.findall(r'https?://[^\s]+', request)
+            urls = re.findall(r"https?://[^\s]+", request)
             if urls:
                 repo_url = urls[0]
-        
+
         if not repo_url:
             return {"status": "error", "answer": "❌ 请提供插件仓库地址"}
-        
+
         if self.plugin_tool:
             result = await self.plugin_tool.install_plugin(repo_url)
             return {"status": "success", "answer": result}
-        
+
         return {"status": "error", "answer": "❌ 插件管理工具不可用"}
-    
-    async def _handle_create_skill(self, params: Dict, request: str, provider_id: str, is_admin: bool) -> Dict[str, Any]:
+
+    async def _handle_create_skill(
+        self, params: Dict, request: str, provider_id: str, is_admin: bool
+    ) -> Dict[str, Any]:
         """处理 Skill 创建"""
         if not is_admin:
             return {"status": "error", "answer": "❌ 只有管理员可以创建 Skill"}
         skill_name = params.get("name", "") or self._extract_skill_name(request) or "my_skill"
         description = params.get("description", request)
-        
+
         if self.skill_tool:
             try:
                 content = await self.skill_tool.generate_skill_from_description(
-                    name=skill_name,
-                    user_description=description,
-                    provider_id=provider_id
+                    name=skill_name, user_description=description, provider_id=provider_id
                 )
                 result = await self.skill_tool.create_skill(
-                    name=skill_name,
-                    description=description[:100],
-                    content=content
+                    name=skill_name, description=description[:100], content=content
                 )
                 return {"status": "success", "answer": result}
             except Exception as e:
                 return {"status": "error", "answer": f"❌ 创建 Skill 失败: {str(e)}"}
-        
+
         return {"status": "error", "answer": "❌ Skill 管理工具不可用"}
-    
-    async def _handle_execute_code(self, params: Dict, request: str, event, is_admin: bool) -> Dict[str, Any]:
+
+    async def _handle_execute_code(
+        self, params: Dict, request: str, event, is_admin: bool
+    ) -> Dict[str, Any]:
         """处理代码执行"""
         if not is_admin:
             return {"status": "error", "answer": "❌ 只有管理员可以执行代码"}
-        
+
         code = params.get("code", "") or self._extract_code(request)
         if not code:
             return {"status": "error", "answer": "❌ 请提供要执行的代码"}
-        
+
         code_type = params.get("type", "shell")
-        
+
         if self.executor:
             result = await self.executor.auto_execute(code=code, event=event, code_type=code_type)
             return {"status": "success", "answer": result}
-        
+
         return {"status": "error", "answer": "❌ 执行器不可用"}
-    
+
     async def _handle_debug(self, params: Dict, request: str, provider_id: str) -> Dict[str, Any]:
         """处理调试请求"""
         if self.debugger:
             result = await self.debugger.analyze_problem(request, provider_id)
             return {"status": "success", "answer": f"🔍 **问题分析:**\n\n{result}"}
-        
+
         return {"status": "error", "answer": "❌ Debug 工具不可用"}
-    
+
     async def _handle_reasoning(self, request: str, provider_id: str) -> Dict[str, Any]:
         """处理普通推理请求"""
 
@@ -857,31 +848,33 @@ class DynamicOrchestrator:
             variables={"request": request},
         )
         return {"status": "success", "answer": answer}
-    
+
     def _extract_keyword(self, text: str, exclude: List[str]) -> str:
         words = text.replace("，", " ").replace(",", " ").split()
         for word in words:
             if word not in exclude and len(word) > 1:
                 return word
         return text[:20]
-    
+
     def _extract_skill_name(self, text: str) -> str:
         matches = re.findall(r'["\']([^"\']+)["\']', text)
         if matches:
             return str(matches[0]).replace(" ", "_").lower()
         return ""
-    
+
     def _extract_code(self, text: str) -> str:
         if "```" in text:
-            matches = re.findall(r'```(?:\w+)?\n?(.*?)```', text, re.DOTALL)
+            matches = re.findall(r"```(?:\w+)?\n?(.*?)```", text, re.DOTALL)
             if matches:
                 return str(matches[0]).strip()
         if "`" in text:
-            matches = re.findall(r'`([^`]+)`', text)
+            matches = re.findall(r"`([^`]+)`", text)
             if matches:
                 return str(matches[0]).strip()
         return ""
-    
-    async def process(self, user_request: str, provider_id: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+
+    async def process(
+        self, user_request: str, provider_id: str, context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
         """处理用户请求（工作流模式）"""
         return await self.process_autonomous(user_request, provider_id, context)

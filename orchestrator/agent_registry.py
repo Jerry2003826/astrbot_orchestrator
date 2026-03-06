@@ -50,7 +50,5 @@ class AgentRegistry:
         lines = ["当前动态 SubAgent："]
         for record in self._records.values():
             created_at = record.created_at.strftime("%H:%M:%S")
-            lines.append(
-                f"- {record.name} ({record.role}) [{record.status}] @ {created_at}"
-            )
+            lines.append(f"- {record.name} ({record.role}) [{record.status}] @ {created_at}")
         return "\n".join(lines)

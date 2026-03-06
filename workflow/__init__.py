@@ -7,9 +7,4 @@
 from .engine import WorkflowEngine
 from .nodes import NodeType, WorkflowDefinition, WorkflowNode
 
-__all__ = [
-    "WorkflowEngine",
-    "WorkflowNode",
-    "WorkflowDefinition",
-    "NodeType"
-]
+__all__ = ["WorkflowEngine", "WorkflowNode", "WorkflowDefinition", "NodeType"]

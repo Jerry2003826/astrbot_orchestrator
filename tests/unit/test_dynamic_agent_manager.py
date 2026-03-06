@@ -120,9 +120,7 @@ def load_dynamic_agent_manager_module(monkeypatch: pytest.MonkeyPatch) -> Any:
         "astrbot_orchestrator_v5.orchestrator.dynamic_agent_manager",
         raising=False,
     )
-    return importlib.import_module(
-        "astrbot_orchestrator_v5.orchestrator.dynamic_agent_manager"
-    )
+    return importlib.import_module("astrbot_orchestrator_v5.orchestrator.dynamic_agent_manager")
 
 
 def make_context(
@@ -244,19 +242,13 @@ def test_dynamic_agent_manager_provider_and_template_overrides_cover_all_fallbac
         context=make_context(),
         config={
             "subagent_settings": {
-                "subagent_template_overrides": {
-                    "review": {"name": "review_agent"}
-                }
+                "subagent_template_overrides": {"review": {"name": "review_agent"}}
             }
         },
     )
     string_manager = module.DynamicAgentManager(
         context=make_context(),
-        config={
-            "subagent_template_overrides": json.dumps(
-                {"research": {"name": "researcher"}}
-            )
-        },
+        config={"subagent_template_overrides": json.dumps({"research": {"name": "researcher"}})},
     )
     bad_settings_manager = module.DynamicAgentManager(
         context=make_context(),
@@ -271,9 +263,7 @@ def test_dynamic_agent_manager_provider_and_template_overrides_cover_all_fallbac
 
     assert direct_manager._get_default_provider_id() == "provider-from-config"
     assert nested_manager._get_default_provider_id() == "provider-from-file"
-    assert string_manager._load_template_overrides() == {
-        "research": {"name": "researcher"}
-    }
+    assert string_manager._load_template_overrides() == {"research": {"name": "researcher"}}
     assert bad_settings_manager._load_template_overrides() == {}
     assert direct_manager.template_library.get("code").name == "custom_code"
     assert nested_manager.template_library.get("review").name == "review_agent"
@@ -337,9 +327,7 @@ def test_dynamic_agent_manager_accessors_and_get_astrbot_config_cover_success_an
     assert manager._get_tool_manager() is tool_manager
     assert manager._get_subagent_orchestrator() is orchestrator
     assert manager._get_astrbot_config() is config_object
-    assert fallback_manager._get_astrbot_config() == {
-        "subagent_orchestrator": {"agents": []}
-    }
+    assert fallback_manager._get_astrbot_config() == {"subagent_orchestrator": {"agents": []}}
 
     caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
     broken_manager = module.DynamicAgentManager(
@@ -643,14 +631,15 @@ async def test_dynamic_agent_manager_remove_from_config_covers_file_and_error_pa
     manager._dynamic_agents["agent-1"] = make_spec("agent-1", "remove_me")
 
     await manager._remove_from_config([])
-    assert json.loads(file_path.read_text(encoding="utf-8"))["subagent_orchestrator"][
-        "agents"
-    ] == [{"name": "keep_me"}, {"name": "remove_me", "_dynamic_": True}]
+    assert json.loads(file_path.read_text(encoding="utf-8"))["subagent_orchestrator"]["agents"] == [
+        {"name": "keep_me"},
+        {"name": "remove_me", "_dynamic_": True},
+    ]
 
     await manager._remove_from_config(["agent-1"])
-    assert json.loads(file_path.read_text(encoding="utf-8"))["subagent_orchestrator"][
-        "agents"
-    ] == [{"name": "keep_me"}]
+    assert json.loads(file_path.read_text(encoding="utf-8"))["subagent_orchestrator"]["agents"] == [
+        {"name": "keep_me"}
+    ]
 
     missing_section_path = tmp_path / "missing_section.json"
     missing_section_path.write_text(json.dumps({}), encoding="utf-8")
@@ -716,9 +705,9 @@ async def test_dynamic_agent_manager_remove_from_config_falls_through_when_memor
 
     await manager._remove_from_config(["agent-1"])
 
-    assert json.loads(file_path.read_text(encoding="utf-8"))["subagent_orchestrator"][
-        "agents"
-    ] == [{"name": "keep_me"}]
+    assert json.loads(file_path.read_text(encoding="utf-8"))["subagent_orchestrator"]["agents"] == [
+        {"name": "keep_me"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -751,9 +740,9 @@ async def test_dynamic_agent_manager_remove_from_config_reads_file_when_memory_s
 
     await manager._remove_from_config(["agent-1"])
 
-    assert json.loads(file_path.read_text(encoding="utf-8"))["subagent_orchestrator"][
-        "agents"
-    ] == [{"name": "keep_me"}]
+    assert json.loads(file_path.read_text(encoding="utf-8"))["subagent_orchestrator"]["agents"] == [
+        {"name": "keep_me"}
+    ]
 
 
 @pytest.mark.asyncio

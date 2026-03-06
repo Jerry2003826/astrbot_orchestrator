@@ -453,7 +453,10 @@ async def test_plugin_manager_install_plugin_covers_unavailable_and_success_case
     """安装插件应覆盖管理器缺失和成功路径。"""
 
     unavailable_tool = PluginManagerTool(context=SimpleNamespace())
-    assert await unavailable_tool.install_plugin("https://github.com/demo/repo") == "❌ 插件管理器不可用"
+    assert (
+        await unavailable_tool.install_plugin("https://github.com/demo/repo")
+        == "❌ 插件管理器不可用"
+    )
 
     proxy_manager = FakePluginManager(
         updator=FakePluginUpdator(install_result="plugins/demo_plugin")
@@ -649,7 +652,9 @@ async def test_plugin_manager_remove_plugin_covers_unavailable_success_and_failu
 
 
 @pytest.mark.asyncio
-async def test_plugin_manager_update_plugin_covers_unavailable_missing_success_and_failure() -> None:
+async def test_plugin_manager_update_plugin_covers_unavailable_missing_success_and_failure() -> (
+    None
+):
     """更新插件应覆盖所有主要结果分支。"""
 
     plugin = SimpleNamespace(name="calendar")
@@ -711,7 +716,9 @@ async def test_plugin_manager_update_plugin_success_without_proxy() -> None:
 def test_plugin_manager_get_available_proxies_and_invalidate_cache() -> None:
     """应渲染代理列表，并在失效时清空缓存。"""
 
-    direct_tool = PluginManagerTool(context=FakeContext(config={"plugin_settings": {"github_proxy": ""}}))
+    direct_tool = PluginManagerTool(
+        context=FakeContext(config={"plugin_settings": {"github_proxy": ""}})
+    )
     direct_text = direct_tool.get_available_proxies()
     assert "✅ 不使用加速 (直连)" in direct_text
 

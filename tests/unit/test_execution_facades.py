@@ -375,7 +375,9 @@ async def test_legacy_execution_facade_file_error_paths(
     _, facade, _, _ = build_facade()
     event = FakeEvent("admin")
 
-    monkeypatch.setattr(SandboxApiClient, "upload_file", build_async_raiser(RuntimeError("disk full")))
+    monkeypatch.setattr(
+        SandboxApiClient, "upload_file", build_async_raiser(RuntimeError("disk full"))
+    )
     assert await facade.write_file("notes/a.txt", "hello", event) == "❌ 创建文件失败: disk full"
 
     monkeypatch.setattr(
@@ -385,7 +387,9 @@ async def test_legacy_execution_facade_file_error_paths(
     )
     assert await facade.read_file("notes/a.txt", event) == "❌ 文件不存在: notes/a.txt"
 
-    monkeypatch.setattr(SandboxApiClient, "download_file", build_async_raiser(RuntimeError("read boom")))
+    monkeypatch.setattr(
+        SandboxApiClient, "download_file", build_async_raiser(RuntimeError("read boom"))
+    )
     assert await facade.read_file("notes/a.txt", event) == "❌ 读取失败: read boom"
 
     monkeypatch.setattr(
@@ -409,7 +413,9 @@ async def test_legacy_execution_facade_service_and_status_error_paths(
     assert await facade.start_web_server("/tmp/demo", 8000, event) == "❌ 启动失败: run boom"
     assert await facade.check_port(8000, event) == "❌ 检查失败: run boom"
 
-    monkeypatch.setattr(SandboxApiClient, "get_sandbox", build_async_raiser(RuntimeError("offline")))
+    monkeypatch.setattr(
+        SandboxApiClient, "get_sandbox", build_async_raiser(RuntimeError("offline"))
+    )
     assert await facade.healthcheck(event) == "❌ 沙盒不可用: offline"
     assert await facade.restart_sandbox(event) == "❌ 重启失败: offline"
 

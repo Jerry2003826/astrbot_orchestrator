@@ -88,7 +88,7 @@ class ExecutionManager:
 
     def _detect_mode(self) -> str:
         """检测应使用的沙盒模式
-        
+
         优先级：
         1. 如果已在 Shipyard 沙盒内 → local（避免嵌套沙盒）
         2. 根据 AstrBot 配置决定
@@ -266,7 +266,7 @@ class ExecutionManager:
     async def write_file(self, file_path: str, content: str, event, skip_auth: bool = False) -> str:
         """
         写入文件（兼容旧接口）
-        
+
         Args:
             file_path: 文件路径
             content: 文件内容

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CodeBlock:
     """代码块"""
+
     language: str
     content: str
     filename: Optional[str] = None
@@ -23,7 +24,7 @@ class CodeBlock:
 
 class CodeExtractor:
     """从 LLM 输出中提取代码块"""
-    
+
     # 语言到文件扩展名的映射
     LANG_TO_EXT = {
         "html": ".html",
@@ -68,7 +69,7 @@ class CodeExtractor:
         "dockerfile": "Dockerfile",
         "makefile": "Makefile",
     }
-    
+
     # 默认文件名映射
     DEFAULT_FILENAMES = {
         "html": "index.html",
@@ -115,11 +116,11 @@ class CodeExtractor:
         if self._looks_like_filename(token):
             return "", token
         return token.lower(), None
-    
+
     def extract_code_blocks(self, text: str) -> List[CodeBlock]:
         """
         从文本中提取所有代码块
-        
+
         支持格式:
         - ```language\ncode\n```
         - ```language:filename\ncode\n```
@@ -127,15 +128,15 @@ class CodeExtractor:
         - 文件名注释模式（代码块前一行有 // filename 或 # filename）
         """
         blocks = []
-        
+
         # 模式1: 捕获 header 整行，再解析语言/文件名，避免把首行代码误识别为文件名
-        pattern = r'```[ \t]*([^\r\n`]*)\r?\n(.*?)```'
+        pattern = r"```[ \t]*([^\r\n`]*)\r?\n(.*?)```"
         matches = re.findall(pattern, text, re.DOTALL)
-        
+
         for header, content in matches:
             lang, filename = self._parse_block_header(header)
             content = content.strip()
-            
+
             # 跳过空代码块
             if not content:
                 continue
@@ -145,9 +146,14 @@ class CodeExtractor:
                 # 移除可能的引号和括号
                 filename = filename.strip("'\"()（）")
                 # 如果文件名看起来不像文件名（没有扩展名且不含路径分隔符），忽略它
-                if filename and not os.path.splitext(filename)[1] and '/' not in filename and '\\' not in filename:
+                if (
+                    filename
+                    and not os.path.splitext(filename)[1]
+                    and "/" not in filename
+                    and "\\" not in filename
+                ):
                     # 可能是描述文字而非文件名，检查是否包含中文
-                    if re.search(r'[\u4e00-\u9fff]', filename):
+                    if re.search(r"[\u4e00-\u9fff]", filename):
                         filename = None
                 if filename:
                     try:
@@ -166,53 +172,46 @@ class CodeExtractor:
                             break
                 if not lang:
                     lang = "text"
-            
+
             # 如果没有指定文件名，使用默认文件名
             if not filename:
                 filename = self.DEFAULT_FILENAMES.get(lang)
-            
-            blocks.append(CodeBlock(
-                language=lang,
-                content=content,
-                filename=filename
-            ))
-        
+
+            blocks.append(CodeBlock(language=lang, content=content, filename=filename))
+
         # 模式2: 检查代码块前的文件名注释
         # 例如: "<!-- index.html -->" 或 "// app.js" 或 "# main.py" 后跟代码块
         if blocks:
-            lines = text.split('\n')
+            lines = text.split("\n")
             for block in blocks:
                 if block.filename:
                     continue
                 # 在原文中找到这个代码块的位置
-                block_start_pattern = re.compile(r'```\s*' + re.escape(block.language))
+                block_start_pattern = re.compile(r"```\s*" + re.escape(block.language))
                 for line_idx, line in enumerate(lines):
                     if block_start_pattern.search(line) and line_idx > 0:
                         prev_line = lines[line_idx - 1].strip()
                         # 检查前一行是否包含文件名
-                        fname_match = re.search(
-                            r'(?://|#|<!--|/\*)\s*([\w./\\-]+\.\w+)',
-                            prev_line
-                        )
+                        fname_match = re.search(r"(?://|#|<!--|/\*)\s*([\w./\\-]+\.\w+)", prev_line)
                         if fname_match:
                             block.filename = fname_match.group(1)
                         break
-        
+
         return blocks
-    
+
     def extract_web_project(self, text: str) -> Dict[str, str]:
         """
         提取 Web 项目文件 (HTML/CSS/JS)
-        
+
         Returns:
             Dict[filename, content]
         """
         blocks = self.extract_code_blocks(text)
         files = {}
-        
+
         # 计数器，用于处理多个同类型文件
         counters: Dict[str, int] = {}
-        
+
         for block in blocks:
             # 确定文件名
             if block.filename:
@@ -228,7 +227,7 @@ class CodeExtractor:
             else:
                 ext = self.LANG_TO_EXT.get(block.language, ".txt")
                 base = self.DEFAULT_FILENAMES.get(block.language, f"file{ext}")
-                
+
                 # 处理重复文件名
                 if base in files:
                     counters[block.language] = counters.get(block.language, 1) + 1
@@ -236,32 +235,83 @@ class CodeExtractor:
                     filename = f"{name}_{counters[block.language]}{ext}"
                 else:
                     filename = base
-            
+
             files[filename] = block.content
-        
+
         return files
-    
+
     def should_save_code(self, text: str) -> bool:
         """判断文本是否包含应该保存的代码"""
         blocks = self.extract_code_blocks(text)
-        
+
         # 检查是否有可执行的代码文件
         saveable_langs = {
-            "html", "css", "javascript", "js", "python", "py",
-            "typescript", "ts", "json", "yaml", "yml", "sql",
-            "bash", "shell", "sh", "php", "java", "go", "rust",
-            "c", "cpp", "ruby", "swift", "kotlin",
-            "wxml", "wxss", "wxs", "vue", "jsx", "tsx",
-            "less", "scss", "sass", "toml", "xml",
+            "html",
+            "css",
+            "javascript",
+            "js",
+            "python",
+            "py",
+            "typescript",
+            "ts",
+            "json",
+            "yaml",
+            "yml",
+            "sql",
+            "bash",
+            "shell",
+            "sh",
+            "php",
+            "java",
+            "go",
+            "rust",
+            "c",
+            "cpp",
+            "ruby",
+            "swift",
+            "kotlin",
+            "wxml",
+            "wxss",
+            "wxs",
+            "vue",
+            "jsx",
+            "tsx",
+            "less",
+            "scss",
+            "sass",
+            "toml",
+            "xml",
         }
         saveable_exts = {
-            ".html", ".css", ".js", ".py", ".ts", ".json",
-            ".yaml", ".yml", ".sql", ".sh", ".php", ".java",
-            ".go", ".rs", ".c", ".cpp", ".rb",
-            ".wxml", ".wxss", ".wxs", ".vue", ".jsx", ".tsx",
-            ".less", ".scss", ".toml", ".xml",
+            ".html",
+            ".css",
+            ".js",
+            ".py",
+            ".ts",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".sql",
+            ".sh",
+            ".php",
+            ".java",
+            ".go",
+            ".rs",
+            ".c",
+            ".cpp",
+            ".rb",
+            ".wxml",
+            ".wxss",
+            ".wxs",
+            ".vue",
+            ".jsx",
+            ".tsx",
+            ".less",
+            ".scss",
+            ".toml",
+            ".xml",
         }
-        
+
         for block in blocks:
             # 降低内容长度阈值：只要有 20 个字符以上的代码就保存
             if block.language in saveable_langs and len(block.content) > 20:
@@ -273,32 +323,28 @@ class CodeExtractor:
             # 即使语言未知，如果有文件名就保存
             if block.filename and len(block.content) > 20:
                 return True
-        
+
         return False
 
 
 class ProjectExporter:
     """项目导出器 - 将代码导出到宝塔目录"""
-    
+
     def __init__(self, base_export_path: str = "/www/wwwroot/downloads"):
         self.base_export_path = base_export_path
-    
+
     async def export_from_sandbox(
-        self,
-        executor,
-        event,
-        project_name: str,
-        sandbox_path: str = "/home/ship_*/workspace"
+        self, executor, event, project_name: str, sandbox_path: str = "/home/ship_*/workspace"
     ) -> Tuple[bool, str]:
         """
         从沙盒导出项目到宝塔目录
-        
+
         Args:
             executor: 执行管理器
             event: 消息事件
             project_name: 项目名称
             sandbox_path: 沙盒中的项目路径
-        
+
         Returns:
             (success, message)
         """
@@ -306,21 +352,21 @@ class ProjectExporter:
             # 在宝塔服务器上创建目录
             # 注意：这里需要通过 Docker exec 在宿主机上操作
             # 因为沙盒是独立的容器
-            
+
             # 1. 先在沙盒中列出文件
             await executor.execute(f"ls -la {sandbox_path}", event)
-            
+
             # 2. 打包文件
             tar_cmd = f"cd {sandbox_path} && tar -czf /tmp/project.tar.gz ."
             await executor.execute(tar_cmd, event)
-            
+
             # 3. 返回打包文件路径
             return True, "项目已打包: /tmp/project.tar.gz"
-            
+
         except Exception as e:
             logger.error(f"导出项目失败: {e}")
             return False, f"导出失败: {str(e)}"
-    
+
     def get_download_path(self, project_name: str) -> str:
         """获取下载路径"""
         return f"{self.base_export_path}/{project_name}"
@@ -328,48 +374,45 @@ class ProjectExporter:
 
 class CodeWriter:
     """代码写入器 - 将代码写入沙盒文件系统"""
-    
+
     def __init__(self, executor, base_path: str = "/workspace"):
         self.executor = executor
         self.base_path = base_path
-    
+
     async def write_files(
-        self,
-        files: Dict[str, str],
-        event,
-        project_name: str = "project"
+        self, files: Dict[str, str], event, project_name: str = "project"
     ) -> Tuple[bool, List[str]]:
         """
         将文件写入沙盒
-        
+
         Args:
             files: {filename: content}
             event: 消息事件
             project_name: 项目名称
-        
+
         Returns:
             (success, created_files)
         """
         project_path = f"{self.base_path}/{project_name}"
         created_files = []
-        
+
         try:
             # 创建项目目录
             logger.info("创建项目目录: %s", project_path)
             await self.executor.execute(f"mkdir -p {project_path}", event)
-            
+
             for filename, content in files.items():
                 file_path = f"{project_path}/{filename}"
-                
+
                 # 创建子目录（如果需要）
                 dir_path = os.path.dirname(file_path)
                 if dir_path != project_path:
                     await self.executor.execute(f"mkdir -p {dir_path}", event)
-                
+
                 # 写入文件（使用 skip_auth=True 绕过权限检查，因为这是内部调用）
                 logger.info("写入文件: %s (内容长度: %d)", file_path, len(content))
                 result = await self.executor.write_file(file_path, content, event, skip_auth=True)
-                
+
                 if "✅" in result or "已创建" in result:
                     created_files.append(file_path)
                     logger.info("✅ 文件已写入: %s", file_path)
@@ -383,30 +426,35 @@ class CodeWriter:
                         logger.info("✅ 文件通过 upload 备用方式写入: %s", file_path)
                     except Exception as upload_err:
                         logger.error("❌ upload 备用写入也失败: %s -> %s", file_path, upload_err)
-            
+
             logger.info("项目文件写入完成: %d/%d 成功", len(created_files), len(files))
             return len(created_files) > 0, created_files
-            
+
         except Exception as e:
             logger.error("写入文件失败: %s", e, exc_info=True)
             return len(created_files) > 0, created_files
-    
+
     async def get_project_files(self, event, project_name: str = "project") -> List[str]:
         """获取项目中的文件列表"""
         project_path = f"{self.base_path}/{project_name}"
-        
+
         try:
             result = await self.executor.execute(f"find {project_path} -type f", event)
-            
+
             # 解析文件列表
             files = []
             for line in result.split("\n"):
                 line = line.strip()
-                if line and not line.startswith("🖥️") and not line.startswith("命令") and project_path in line:
+                if (
+                    line
+                    and not line.startswith("🖥️")
+                    and not line.startswith("命令")
+                    and project_path in line
+                ):
                     files.append(line)
-            
+
             return files
-            
+
         except Exception as e:
             logger.error(f"获取文件列表失败: {e}")
             return []

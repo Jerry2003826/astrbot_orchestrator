@@ -338,7 +338,11 @@ async def test_skill_creator_create_skill_covers_existing_success_scripts_and_no
     )
     skill_dir = tmp_path / "weather_skill"
     assert "✅ Skill `weather_skill` 创建成功！" in success_result
-    assert (skill_dir / "SKILL.md").read_text(encoding="utf-8").startswith("---\ndescription: 天气描述")
+    assert (
+        (skill_dir / "SKILL.md")
+        .read_text(encoding="utf-8")
+        .startswith("---\ndescription: 天气描述")
+    )
     assert (skill_dir / "scripts" / "run.py").read_text(encoding="utf-8") == "print('ok')"
     assert success_manager.set_active_calls == [("weather_skill", True)]
 

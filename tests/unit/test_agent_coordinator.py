@@ -276,9 +276,9 @@ async def test_agent_coordinator_run_llm_task_warns_non_admin_when_code_detected
 ) -> None:
     """非管理员检测到代码时应只追加提示而不写文件。"""
 
-    fake_context.queue_response('''```python:main.py
+    fake_context.queue_response("""```python:main.py
 print("ok")
-```''')
+```""")
     artifact_service = FakeArtifactService(written_files=["/workspace/project_1/main.py"])
     coordinator = AgentCoordinator(
         context=fake_context,
@@ -305,9 +305,9 @@ async def test_agent_coordinator_run_llm_task_writes_files_for_admin(
 ) -> None:
     """管理员上下文检测到代码时应写入工作区并记录文件。"""
 
-    fake_context.queue_response('''```python:main.py
+    fake_context.queue_response("""```python:main.py
 print("ok")
-```''')
+```""")
     artifact_service = FakeArtifactService(written_files=["/workspace/project_1/main.py"])
     coordinator = AgentCoordinator(
         context=fake_context,
@@ -325,9 +325,11 @@ print("ok")
 
     assert created_files == ["/workspace/project_1/main.py"]
     assert coordinator.all_created_files == ["/workspace/project_1/main.py"]
-    assert coordinator._all_task_outputs == ['''```python:main.py
+    assert coordinator._all_task_outputs == [
+        """```python:main.py
 print("ok")
-```''']
+```"""
+    ]
     assert "📁 **已创建文件:**" in output_text
     assert len(artifact_service.write_calls) == 1
 
@@ -338,9 +340,9 @@ async def test_agent_coordinator_execute_renders_completed_file_task(
 ) -> None:
     """端到端执行应在最终回答中包含创建文件信息。"""
 
-    fake_context.queue_response('''```python:main.py
+    fake_context.queue_response("""```python:main.py
 print("ok")
-```''')
+```""")
     artifact_service = FakeArtifactService(written_files=["/workspace/project_1/main.py"])
     coordinator = AgentCoordinator(
         context=fake_context,
@@ -567,9 +569,13 @@ async def test_agent_coordinator_run_llm_task_logs_write_edge_cases(
 ) -> None:
     """LLM 写文件流程应覆盖提取为空、执行器缺失与空写入分支。"""
 
-    extract_empty_context = RecordingContext(['''```python:main.py
+    extract_empty_context = RecordingContext(
+        [
+            """```python:main.py
 print("ok")
-```'''])
+```"""
+        ]
+    )
     extract_empty = AgentCoordinator(
         context=extract_empty_context,
         capability_builder=FakeCapabilityBuilder(executor=object()),
@@ -592,9 +598,13 @@ print("ok")
     assert created_files == []
     assert "代码提取结果为空" in caplog.text
 
-    missing_executor_context = RecordingContext(['''```python:main.py
+    missing_executor_context = RecordingContext(
+        [
+            """```python:main.py
 print("ok")
-```'''])
+```"""
+        ]
+    )
     missing_executor = AgentCoordinator(
         context=missing_executor_context,
         capability_builder=FakeCapabilityBuilder(executor=None),
@@ -623,9 +633,13 @@ print("ok")
 
     assert "执行器不可用，无法写入文件" in caplog.text
 
-    empty_write_context = RecordingContext(['''```python:main.py
+    empty_write_context = RecordingContext(
+        [
+            """```python:main.py
 print("ok")
-```'''])
+```"""
+        ]
+    )
     empty_write_artifact = FakeArtifactService(written_files=[])
     empty_write = AgentCoordinator(
         context=empty_write_context,
@@ -680,9 +694,7 @@ async def test_agent_coordinator_run_llm_task_reraises_llm_failures(
 def test_agent_coordinator_strip_code_blocks_covers_all_placeholder_variants() -> None:
     """代码块剥离应覆盖文件名、语言名和无元信息三种占位文本。"""
 
-    with_filename = AgentCoordinator._strip_code_blocks(
-        "```python:main.py\nprint('ok')\n```"
-    )
+    with_filename = AgentCoordinator._strip_code_blocks("```python:main.py\nprint('ok')\n```")
     with_language = AgentCoordinator._strip_code_blocks("```python \n```")
     without_meta = AgentCoordinator._strip_code_blocks("```\n```")
 

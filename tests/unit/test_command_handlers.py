@@ -88,6 +88,7 @@ class FakeExecutor:
 
         self.calls.append(("exec_code", (code, event), {"kernel": kernel, "stream": stream}))
         if stream:
+
             async def _generator():
                 yield ExecChunk(type="stdout", content="part-1")
                 yield ExecChunk(type="stdout", content="part-2")
@@ -581,7 +582,9 @@ async def test_command_handlers_agent_status_and_templates_report_missing_compon
     )
 
     fake_event.message_str = "status"
-    assert await collect_results(handlers.handle_agent(fake_event)) == ["❌ SubAgent 编排器未初始化"]
+    assert await collect_results(handlers.handle_agent(fake_event)) == [
+        "❌ SubAgent 编排器未初始化"
+    ]
 
     fake_event.message_str = "templates"
     assert await collect_results(handlers.handle_agent(fake_event)) == ["❌ SubAgent 模板未初始化"]
@@ -597,7 +600,9 @@ async def test_command_handlers_agent_builds_request_context_and_returns_answer(
     orchestrator = FakeOrchestrator(result={"answer": "agent-success"})
     build_calls: list[tuple[Any, str, str, str]] = []
 
-    def build_request_context(event: Any, request: str, provider_id: str, source: str) -> dict[str, Any]:
+    def build_request_context(
+        event: Any, request: str, provider_id: str, source: str
+    ) -> dict[str, Any]:
         """记录请求上下文构建参数。"""
 
         build_calls.append((event, request, provider_id, source))
@@ -614,9 +619,7 @@ async def test_command_handlers_agent_builds_request_context_and_returns_answer(
 
     assert results == ["🤖 正在分析任务，请稍候...", "agent-success"]
     assert context.calls == [fake_event.unified_msg_origin]
-    assert build_calls == [
-        (fake_event, "帮我写一个示例", "provider-y", "agent")
-    ]
+    assert build_calls == [(fake_event, "帮我写一个示例", "provider-y", "agent")]
     assert orchestrator.calls == [
         {"request": "帮我写一个示例", "provider_id": "provider-y", "source": "agent"}
     ]
@@ -740,14 +743,18 @@ async def test_command_handlers_plugin_covers_help_install_remove_and_update_den
 
     fake_event.role = "member"
     fake_event.message_str = "remove demo-plugin"
-    assert await collect_results(handlers.handle_plugin(fake_event)) == ["❌ 只有管理员可以卸载插件"]
+    assert await collect_results(handlers.handle_plugin(fake_event)) == [
+        "❌ 只有管理员可以卸载插件"
+    ]
 
     fake_event.role = "admin"
     assert await collect_results(handlers.handle_plugin(fake_event)) == ["remove:demo-plugin"]
 
     fake_event.role = "member"
     fake_event.message_str = "update demo-plugin"
-    assert await collect_results(handlers.handle_plugin(fake_event)) == ["❌ 只有管理员可以更新插件"]
+    assert await collect_results(handlers.handle_plugin(fake_event)) == [
+        "❌ 只有管理员可以更新插件"
+    ]
 
 
 @pytest.mark.asyncio
@@ -775,7 +782,9 @@ async def test_command_handlers_skill_routes_multiple_actions(
 
     fake_event.message_str = "delete weather"
     fake_event.role = "member"
-    assert await collect_results(handlers.handle_skill(fake_event)) == ["❌ 只有管理员可以删除 Skill"]
+    assert await collect_results(handlers.handle_skill(fake_event)) == [
+        "❌ 只有管理员可以删除 Skill"
+    ]
 
     fake_event.role = "admin"
     assert await collect_results(handlers.handle_skill(fake_event)) == ["delete-skill:weather"]
@@ -802,7 +811,9 @@ async def test_command_handlers_skill_covers_help_missing_name_and_invalid_actio
     assert await collect_results(handlers.handle_skill(fake_event)) == ["请提供 Skill 名称"]
 
     fake_event.message_str = "oops"
-    assert await collect_results(handlers.handle_skill(fake_event)) == ["无效命令，请使用 /skill 查看帮助"]
+    assert await collect_results(handlers.handle_skill(fake_event)) == [
+        "无效命令，请使用 /skill 查看帮助"
+    ]
 
 
 @pytest.mark.asyncio
@@ -973,7 +984,9 @@ async def test_command_handlers_sandbox_covers_permission_help_and_missing_param
 
     fake_event.role = "member"
     fake_event.message_str = "status"
-    assert await collect_results(handlers.handle_sandbox(fake_event)) == ["❌ 只有管理员可以操作沙盒"]
+    assert await collect_results(handlers.handle_sandbox(fake_event)) == [
+        "❌ 只有管理员可以操作沙盒"
+    ]
 
     fake_event.role = "admin"
     fake_event.message_str = ""

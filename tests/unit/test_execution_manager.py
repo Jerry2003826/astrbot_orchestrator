@@ -192,9 +192,7 @@ class FakeLegacyFacade:
     ) -> str:
         """记录 write_file 调用。"""
 
-        self.calls.append(
-            ("write_file", (file_path, content, event), {"skip_auth": skip_auth})
-        )
+        self.calls.append(("write_file", (file_path, content, event), {"skip_auth": skip_auth}))
         return "write-file-result"
 
     async def read_file(self, file_path: str, event: Any) -> str:
@@ -288,12 +286,18 @@ async def test_execution_manager_delegates_legacy_facade_calls() -> None:
     assert await manager.execute("ls", "evt") == "execute-result"
     assert await manager.execute_local("pwd", "evt") == "execute-local-result"
     assert await manager.execute_sandbox("pwd", "evt") == "execute-sandbox-result"
-    assert await manager.execute_python("print(1)", "evt", force_mode="local") == "execute-python-result"
+    assert (
+        await manager.execute_python("print(1)", "evt", force_mode="local")
+        == "execute-python-result"
+    )
     assert await manager.auto_execute("ls", "evt", code_type="shell") == "auto-execute-result"
     assert await manager.write_file("a.txt", "x", "evt", skip_auth=True) == "write-file-result"
     assert await manager.read_file("a.txt", "evt") == "read-file-result"
     assert await manager.list_files(".", "evt") == "list-files-result"
-    assert await manager.start_web_server("/tmp/demo", 8000, "evt", framework="fastapi") == "start-server-result"
+    assert (
+        await manager.start_web_server("/tmp/demo", 8000, "evt", framework="fastapi")
+        == "start-server-result"
+    )
     assert await manager.healthcheck("evt") == "healthcheck-result"
     assert await manager.restart_sandbox("evt") == "restart-result"
     assert await manager.check_port(8000, "evt") == "check-port-result"

@@ -99,8 +99,12 @@ def test_runtime_container_build_calls_steps_in_order(
         order.append("orchestrator")
 
     monkeypatch.setattr(RuntimeContainer, "_build_core_tools", fake_build_core_tools)
-    monkeypatch.setattr(RuntimeContainer, "_build_workflow_components", fake_build_workflow_components)
-    monkeypatch.setattr(RuntimeContainer, "_build_subagent_components", fake_build_subagent_components)
+    monkeypatch.setattr(
+        RuntimeContainer, "_build_workflow_components", fake_build_workflow_components
+    )
+    monkeypatch.setattr(
+        RuntimeContainer, "_build_subagent_components", fake_build_subagent_components
+    )
     monkeypatch.setattr(RuntimeContainer, "_build_orchestrator", fake_build_orchestrator)
 
     container = RuntimeContainer.build(context="ctx", config={"enabled": True})

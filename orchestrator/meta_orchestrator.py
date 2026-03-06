@@ -32,7 +32,7 @@ class MetaOrchestrator:
         self.agent_manager = agent_manager
         self.coordinator = coordinator
         self.config = config or {}
-        
+
         # 使用传入的 artifact_service，或者动态获取插件目录
         if artifact_service:
             self.artifact_service = artifact_service
@@ -40,19 +40,19 @@ class MetaOrchestrator:
             # 动态获取插件目录下的 projects 文件夹
             persist_dir = self._get_plugin_projects_dir()
             self.artifact_service = ArtifactService(persist_dir)
-        
+
         # 确保持久化目录存在
         os.makedirs(self.artifact_service.persist_dir, exist_ok=True)
-    
+
     def _get_plugin_projects_dir(self) -> str:
         """获取插件的项目存储目录。"""
         from pathlib import Path
-        
+
         # 从当前文件位置推断插件目录
         current_file = Path(__file__).resolve()
         plugin_root = current_file.parent.parent  # astrbot_orchestrator_v5 目录
         projects_dir = plugin_root / "projects"
-        
+
         return str(projects_dir)
 
     async def process(
@@ -63,7 +63,7 @@ class MetaOrchestrator:
         is_admin: bool,
     ) -> Dict[str, Any]:
         logger.info("MetaOrchestrator 开始处理: request=%s...", user_request[:50])
-        
+
         logger.info("步骤1: 分析任务...")
         plan: TaskPlan = await self.task_analyzer.analyze(user_request, provider_id)
         logger.info("步骤1完成: %d agents, %d tasks", len(plan.agents), len(plan.tasks))
@@ -71,7 +71,7 @@ class MetaOrchestrator:
         logger.info("步骤2: 创建 SubAgents...")
         agents = await self.agent_manager.create_agents(plan.agents)
         logger.info("步骤2完成: 创建了 %d 个 agents", len(agents))
-        
+
         logger.info("步骤3: 执行任务...")
         result = cast(
             dict[str, Any],
@@ -113,12 +113,14 @@ class MetaOrchestrator:
             result=result,
             project_name=project_name,
         )
-        
+
         if persist_result.get("success") and persist_result.get("saved_files"):
             saved_files = persist_result["saved_files"]
             export_path = persist_result["path"]
             result["export_path"] = export_path
-            file_list = "\n".join([f"  - `{f}` → `{os.path.join(export_path, f)}`" for f in saved_files])
+            file_list = "\n".join(
+                [f"  - `{f}` → `{os.path.join(export_path, f)}`" for f in saved_files]
+            )
             result["answer"] += (
                 f"\n\n📦 **文件已持久化保存（共 {len(saved_files)} 个）:**\n{file_list}"
                 f"\n\n💾 **项目绝对路径:** `{export_path}`"
@@ -133,15 +135,15 @@ class MetaOrchestrator:
             # 回退：尝试从沙盒导出
             logger.info("步骤4: 本地保存无文件，尝试从沙盒导出...")
             export_result = await self._export_from_sandbox(
-                created_files=created_files,
-                event=event,
-                project_name=project_name
+                created_files=created_files, event=event, project_name=project_name
             )
             if export_result.get("success") and export_result.get("saved_files"):
                 saved_files = export_result["saved_files"]
                 export_path = export_result["path"]
                 result["export_path"] = export_path
-                file_list = "\n".join([f"  - `{f}` → `{os.path.join(export_path, f)}`" for f in saved_files])
+                file_list = "\n".join(
+                    [f"  - `{f}` → `{os.path.join(export_path, f)}`" for f in saved_files]
+                )
                 result["answer"] += (
                     f"\n\n📦 **文件已持久化保存（共 {len(saved_files)} 个）:**\n{file_list}"
                     f"\n\n💾 **项目绝对路径:** `{export_path}`"
@@ -172,7 +174,7 @@ class MetaOrchestrator:
     ) -> List[str]:
         """
         兜底代码提取：合并所有任务的原始输出，尝试提取代码块并写入文件系统。
-        
+
         如果所有任务输出中都没有代码块，则尝试让 LLM 重新生成一次带代码的回答。
         """
         created_files: list[str] = []
@@ -288,14 +290,11 @@ print("hello")
         return []
 
     async def _export_from_sandbox(
-        self,
-        created_files: List[str],
-        event,
-        project_name: str
+        self, created_files: List[str], event, project_name: str
     ) -> Dict[str, Any]:
         """
         从沙盒导出文件到插件持久化目录（备用方案）
-        
+
         策略：
         1. 搜索 /home/ship_*/workspace/ 下的文件（Shipyard 实际路径）
         2. 也搜索 /workspace/ 下的文件
@@ -314,7 +313,7 @@ print("hello")
                     created_files=created_files,
                 ),
             )
-            
+
         except Exception as e:
             logger.error("导出文件失败: %s", e, exc_info=True)
             return {"success": False, "error": str(e)}

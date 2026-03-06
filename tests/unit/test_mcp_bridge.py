@@ -216,9 +216,7 @@ async def test_mcp_bridge_call_tool_covers_missing_manager_tool_server_and_succe
         await no_manager_bridge.call_tool("alpha", {})
 
     alpha_client = FakeMcpClient(active=True, tools=[make_tool("alpha")], result={"value": 1})
-    success_bridge = MCPBridge(
-        context=make_context(FakeToolManager({"server-a": alpha_client}))
-    )
+    success_bridge = MCPBridge(context=make_context(FakeToolManager({"server-a": alpha_client})))
     missing_tool_bridge = MCPBridge(context=make_context(FakeToolManager({})))
     missing_server_bridge = MCPBridge(context=make_context(FakeToolManager({})))
     missing_server_bridge._tools_cache = [

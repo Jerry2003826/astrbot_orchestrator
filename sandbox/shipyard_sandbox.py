@@ -86,7 +86,7 @@ class ShipyardSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> dict[str, t.Any]:
         """通过 booter 执行 shell 命令
-        
+
         Args:
             command: 要执行的命令
             timeout: 超时时间（秒），None 则使用实例默认值
@@ -130,9 +130,7 @@ class ShipyardSandbox(CodeSandbox):
                 # Python 代码：写入临时文件执行
                 # 转义单引号
                 escaped = code.replace("'", "'\\''")
-                command = (
-                    f"cd {quoted_work_dir} && python3 -c '{escaped}'"
-                )
+                command = f"cd {quoted_work_dir} && python3 -c '{escaped}'"
 
             result = await asyncio.wait_for(
                 self._shell_exec(command, timeout=timeout),
@@ -220,9 +218,7 @@ class ShipyardSandbox(CodeSandbox):
 
         payload = content.encode("utf-8") if isinstance(content, str) else content
         b64 = base64.b64encode(payload).decode("ascii")
-        await self._shell_exec(
-            f"printf %s {shlex.quote(b64)} | base64 -d > {quoted_path}"
-        )
+        await self._shell_exec(f"printf %s {shlex.quote(b64)} | base64 -d > {quoted_path}")
 
         # 获取文件大小
         size_result = await self._shell_exec(f"stat -c %s {quoted_path} 2>/dev/null || echo -1")
@@ -298,7 +294,7 @@ class ShipyardSandbox(CodeSandbox):
     @staticmethod
     def _parse_size(size_str: str) -> int:
         """解析人类可读的文件大小为字节数"""
-        units = {"K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
+        units = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
         try:
             number = float(size_str[:-1])
             unit = size_str[-1].upper()

@@ -89,10 +89,14 @@ class ExecutionFormatter:
         lines.append(f"退出码: {result.exit_code}\n")
 
         if result.text:
-            lines.append(f"**输出:**\n```\n{self._truncate(result.text, self.max_output_chars)}\n```")
+            lines.append(
+                f"**输出:**\n```\n{self._truncate(result.text, self.max_output_chars)}\n```"
+            )
 
         if result.errors:
-            lines.append(f"**错误:**\n```\n{self._truncate(result.errors, self.max_error_chars)}\n```")
+            lines.append(
+                f"**错误:**\n```\n{self._truncate(result.errors, self.max_error_chars)}\n```"
+            )
 
         if result.images:
             lines.append(f"📷 生成了 {len(result.images)} 张图片")
