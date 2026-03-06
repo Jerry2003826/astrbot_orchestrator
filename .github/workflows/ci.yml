@@ -31,6 +31,7 @@ jobs:
         run: bandit -q -r artifacts entrypoints runtime shared sandbox workflow
 
       - name: Pytest
-        env:
-          PYTHONPATH: .
-        run: pytest tests/unit
+        run: |
+          mkdir -p /tmp/pkg
+          ln -s $PWD /tmp/pkg/astrbot_orchestrator_v5
+          PYTHONPATH=/tmp/pkg pytest tests/unit
