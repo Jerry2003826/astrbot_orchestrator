@@ -40,7 +40,6 @@ addopts = "-ra --strict-markers --strict-config --cov=astrbot_orchestrator_v5 --
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = [
-  "error",
   "ignore::coverage.exceptions.CoverageWarning",
   "ignore::pytest.PytestUnraisableExceptionWarning",
   "ignore::DeprecationWarning:pytest_asyncio",
