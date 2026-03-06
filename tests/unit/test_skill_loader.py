@@ -83,11 +83,11 @@ def install_fake_skill_modules(
         names = ",".join(info.name for info in skill_infos)
         return f"PROMPT:{names}"
 
-    setattr(skills_module, "SkillManager", skill_manager_class)
-    setattr(skill_manager_module, "SkillInfo", FakeSkillInfo)
-    setattr(skill_manager_module, "build_skills_prompt", build_skills_prompt)
-    setattr(astrbot_module, "core", core_module)
-    setattr(core_module, "skills", skills_module)
+    skills_module.SkillManager = skill_manager_class
+    skill_manager_module.SkillInfo = FakeSkillInfo
+    skill_manager_module.build_skills_prompt = build_skills_prompt
+    astrbot_module.core = core_module
+    core_module.skills = skills_module
 
     monkeypatch.setitem(sys.modules, "astrbot", astrbot_module)
     monkeypatch.setitem(sys.modules, "astrbot.core", core_module)

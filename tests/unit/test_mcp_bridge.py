@@ -89,11 +89,7 @@ def make_context(tool_manager: Any | None = None) -> Any:
 
     context = SimpleNamespace()
     if tool_manager is not None:
-        setattr(
-            context,
-            "provider_manager",
-            SimpleNamespace(llm_tools=tool_manager),
-        )
+        context.provider_manager = SimpleNamespace(llm_tools=tool_manager)
     return context
 
 
@@ -106,7 +102,7 @@ def make_tool(
 
     tool = SimpleNamespace(name=name, description=description)
     if input_schema is not None:
-        setattr(tool, "inputSchema", input_schema)
+        tool.inputSchema = input_schema
     return tool
 
 

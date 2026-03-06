@@ -235,7 +235,7 @@ async def test_shipyard_start_and_stop_manage_lifecycle(monkeypatch: "MonkeyPatc
     assert booter_calls == 1
     assert shell_calls == [("mkdir -p '/workspace/demo app'", None)]
 
-    setattr(sandbox, "_booter", object())
+    sandbox._booter = object()
     await sandbox.astop()
     assert sandbox._started is False
     assert sandbox._booter is None
@@ -749,14 +749,14 @@ async def test_shipyard_variables_and_restart_behaviour(monkeypatch: "MonkeyPatc
     sandbox = ShipyardSandbox()
     calls = 0
     new_booter = object()
-    setattr(sandbox, "_booter", object())
+    sandbox._booter = object()
 
     async def fake_get_booter() -> object:
         """记录重启后的 booter 获取。"""
 
         nonlocal calls
         calls += 1
-        setattr(sandbox, "_booter", new_booter)
+        sandbox._booter = new_booter
         return new_booter
 
     monkeypatch.setattr(sandbox, "_get_booter", fake_get_booter)

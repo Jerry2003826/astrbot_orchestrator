@@ -111,8 +111,8 @@ def load_dynamic_agent_manager_module(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     astrbot_module = ModuleType("astrbot")
     api_module = ModuleType("astrbot.api")
-    setattr(api_module, "logger", logging.getLogger(LOGGER_NAME))
-    setattr(astrbot_module, "api", api_module)
+    api_module.logger = logging.getLogger(LOGGER_NAME)
+    astrbot_module.api = api_module
     monkeypatch.setitem(sys.modules, "astrbot", astrbot_module)
     monkeypatch.setitem(sys.modules, "astrbot.api", api_module)
     monkeypatch.delitem(
@@ -134,17 +134,13 @@ def make_context(
 
     context = SimpleNamespace()
     if get_config is not None:
-        setattr(context, "get_config", get_config)
+        context.get_config = get_config
     if astrbot_config is not None:
-        setattr(context, "astrbot_config", astrbot_config)
+        context.astrbot_config = astrbot_config
     if tool_manager is not None:
-        setattr(
-            context,
-            "provider_manager",
-            SimpleNamespace(llm_tools=tool_manager),
-        )
+        context.provider_manager = SimpleNamespace(llm_tools=tool_manager)
     if orchestrator is not None:
-        setattr(context, "subagent_orchestrator", orchestrator)
+        context.subagent_orchestrator = orchestrator
     return context
 
 

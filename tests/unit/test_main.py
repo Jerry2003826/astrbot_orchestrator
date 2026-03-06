@@ -88,7 +88,7 @@ def load_main_module(monkeypatch: pytest.MonkeyPatch) -> MainTestHarness:
             """为命令处理函数打标记。"""
 
             def decorator(func: Any) -> Any:
-                setattr(func, "_command_name", command_name)
+                func._command_name = command_name
                 return func
 
             return decorator
@@ -226,7 +226,7 @@ def load_main_module(monkeypatch: pytest.MonkeyPatch) -> MainTestHarness:
         """模拟 AstrBot `register` 装饰器。"""
 
         def decorator(cls: Any) -> Any:
-            setattr(cls, "_register_kwargs", kwargs)
+            cls._register_kwargs = kwargs
             return cls
 
         return decorator
@@ -250,9 +250,9 @@ def load_main_module(monkeypatch: pytest.MonkeyPatch) -> MainTestHarness:
         register=register,
     )
     astrbot_module = install_stub_module(monkeypatch, "astrbot")
-    setattr(astrbot_module, "api", astrbot_api_module)
-    setattr(astrbot_api_module, "event", astrbot_event_module)
-    setattr(astrbot_api_module, "star", astrbot_star_module)
+    astrbot_module.api = astrbot_api_module
+    astrbot_api_module.event = astrbot_event_module
+    astrbot_api_module.star = astrbot_star_module
 
     install_stub_module(
         monkeypatch,
