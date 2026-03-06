@@ -86,8 +86,8 @@ class RuntimeContainer:
         if hasattr(self.context, "get_plugin_data_dir"):
             try:
                 plugin_dir = self.context.get_plugin_data_dir()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("获取插件数据目录失败，使用回退路径: %s", exc)
 
         # 方法2: 使用 AstrBot 的 data/plugins 目录
         if not plugin_dir:
