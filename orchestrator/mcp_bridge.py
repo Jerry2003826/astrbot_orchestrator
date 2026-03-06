@@ -88,7 +88,7 @@ class MCPBridge:
             try:
                 tool_info = {
                     "name": getattr(tool, "name", str(tool)),
-                    "description": getattr(tool, "description", ""),
+                    "description": getattr(tool, "description", "") or "",
                     "parameters": getattr(tool, "parameters", {}),
                     "type": "tool",
                 }
@@ -138,17 +138,16 @@ class MCPBridge:
             try:
                 # 检查客户端是否活跃
                 is_active = getattr(client, "active", True)
-                if not is_active:
-                    continue
-
-                # 获取工具列表
                 client_tools = getattr(client, "tools", [])
                 servers_info[server_name] = {"active": is_active, "tool_count": len(client_tools)}
+
+                if not is_active:
+                    continue
 
                 for mcp_tool in client_tools:
                     tool_info = {
                         "name": getattr(mcp_tool, "name", str(mcp_tool)),
-                        "description": getattr(mcp_tool, "description", ""),
+                        "description": getattr(mcp_tool, "description", "") or "",
                         "server": server_name,
                         "parameters": getattr(
                             mcp_tool, "inputSchema", getattr(mcp_tool, "parameters", {})
@@ -199,7 +198,7 @@ class MCPBridge:
                     servers_info.update(servers)
                     logger.debug(f"从 mcp_client_dict 获取到 {len(mcp_tools)} 个工具")
             except Exception as e:
-                logger.debug(f"从 mcp_client_dict 提取失败: {e}")
+                logger.error(f"读取 MCP 工具失败: {e}")
 
         self._tools_cache = tools
         self._servers_cache = servers_info

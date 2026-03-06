@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 class MetaOrchestrator:
     """元编排器：分析任务 -> 动态创建 SubAgent -> 协调执行"""
 
+    PERSIST_DIR: str = ""
+
     def __init__(
         self,
         context,
@@ -42,10 +44,15 @@ class MetaOrchestrator:
             self.artifact_service = ArtifactService(persist_dir)
 
         # 确保持久化目录存在
-        os.makedirs(self.artifact_service.persist_dir, exist_ok=True)
+        _persist_dir = getattr(self.artifact_service, "persist_dir", None)
+        if _persist_dir:
+            os.makedirs(_persist_dir, exist_ok=True)
 
     def _get_plugin_projects_dir(self) -> str:
         """获取插件的项目存储目录。"""
+        if self.PERSIST_DIR:
+            return self.PERSIST_DIR
+
         from pathlib import Path
 
         # 从当前文件位置推断插件目录

@@ -41,6 +41,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = [
   "error",
+  "ignore::coverage.exceptions.CoverageWarning",
+  "ignore::pytest.PytestUnraisableExceptionWarning",
+  "ignore::DeprecationWarning:pytest_asyncio",
 ]
 
 [tool.coverage.run]

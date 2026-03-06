@@ -79,9 +79,7 @@ class AstrBotSkillLoader:
 
         for module_path, class_name in import_paths:
             try:
-                import importlib
-
-                module = importlib.import_module(module_path)
+                module = __import__(module_path, fromlist=[class_name])
                 SkillManagerClass = getattr(module, class_name, None)
 
                 if SkillManagerClass:
@@ -111,7 +109,7 @@ class AstrBotSkillLoader:
             except Exception as e:
                 logger.debug(f"实例化 {module_path}.{class_name} 失败: {e}")
 
-        logger.warning("无法获取 SkillManager，Skill 功能可能不可用")
+        logger.warning("无法导入 SkillManager，Skill 功能可能不可用")
         return None
 
     def _get_skills_directory(self) -> Path | None:
@@ -179,11 +177,12 @@ class AstrBotSkillLoader:
                 or getattr(skill_obj, "__dict__", {}).get("path", "")
             )
 
-            active = (
-                getattr(skill_obj, "active", True)
-                or (skill_obj.get("active", True) if isinstance(skill_obj, dict) else True)
-                or getattr(skill_obj, "__dict__", {}).get("active", True)
-            )
+            active_val = getattr(skill_obj, "active", None)
+            if active_val is None and isinstance(skill_obj, dict):
+                active_val = skill_obj.get("active", None)
+            if active_val is None:
+                active_val = getattr(skill_obj, "__dict__", {}).get("active", True)
+            active = active_val if active_val is not None else True
 
             return {
                 "name": str(name),
@@ -236,14 +235,14 @@ class AstrBotSkillLoader:
 
                             sig = inspect.signature(method)
                             if "active_only" in sig.parameters:
-                                skill_infos = method(active_only=False)  # 获取全部，稍后过滤
+                                skill_infos = method(active_only=active_only)
                             else:
                                 skill_infos = method()
 
                             logger.debug(f"通过 {method_name}() 获取到 Skills")
                             break
                     except Exception as e:
-                        logger.debug(f"调用 {method_name}() 失败: {e}")
+                        logger.error(f"读取 Skills 失败: {e}")
 
             # 如果方法调用成功，解析结果
             if skill_infos:
@@ -382,9 +381,7 @@ class AstrBotSkillLoader:
 
             for module_path in import_paths:
                 try:
-                    import importlib
-
-                    module = importlib.import_module(module_path)
+                    module = __import__(module_path, fromlist=["SkillInfo", "build_skills_prompt"])
                     SkillInfo = getattr(module, "SkillInfo", None)
                     build_prompt_func = getattr(module, "build_skills_prompt", None)
 
