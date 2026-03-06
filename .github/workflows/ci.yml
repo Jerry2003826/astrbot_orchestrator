@@ -31,4 +31,6 @@ jobs:
         run: bandit -q -r artifacts entrypoints runtime shared sandbox workflow
 
       - name: Pytest
+        env:
+          PYTHONPATH: .
         run: pytest tests/unit
