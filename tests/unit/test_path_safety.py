@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import shlex
 from pathlib import Path
+import shlex
 from typing import TYPE_CHECKING
 
 import pytest

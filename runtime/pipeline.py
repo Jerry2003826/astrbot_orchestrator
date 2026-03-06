@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
+import json
 from string import Template
 from typing import Any, Awaitable, Callable, Generic, Protocol, TypeVar, cast
 

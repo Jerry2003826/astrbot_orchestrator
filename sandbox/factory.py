@@ -13,11 +13,11 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 import logging
 import os
 import socket
 import typing as t
-from importlib.util import find_spec
 
 from .base import CodeSandbox
 

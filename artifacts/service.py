@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import os
-from dataclasses import dataclass
 from typing import Any, Mapping, cast
 
 from ..orchestrator.code_extractor import CodeExtractor, CodeWriter

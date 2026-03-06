@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import builtins
 import logging
-import sys
 from pathlib import Path
+import sys
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any
 

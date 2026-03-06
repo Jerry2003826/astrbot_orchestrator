@@ -9,8 +9,8 @@ AstrBot 全自主智能体编排器
 - 选择 local 或 sandbox 执行
 """
 
-import logging
 from collections.abc import AsyncIterator
+import logging
 from typing import Any
 
 from astrbot.api import AstrBotConfig

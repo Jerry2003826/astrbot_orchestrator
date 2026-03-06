@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import builtins
+from collections.abc import AsyncIterator
 import shlex
 import sys
-from collections.abc import AsyncIterator
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 

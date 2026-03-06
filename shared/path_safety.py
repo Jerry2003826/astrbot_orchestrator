@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import re
 import shlex
-from pathlib import Path
 
 _CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x1F\x7F]")
 _SHELL_META_PATTERN = re.compile(r"[;&|`$<>!]")

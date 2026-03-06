@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import importlib
 import sys
-from dataclasses import dataclass
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 

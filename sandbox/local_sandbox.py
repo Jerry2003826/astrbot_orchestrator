@@ -13,9 +13,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from pathlib import Path
 import re
 import typing as t
-from pathlib import Path
 
 from ..shared import UnsafePathError, ensure_within_base
 from .base import CodeSandbox
