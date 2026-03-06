@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from astrbot_orchestrator_v5.orchestrator.task_analyzer import AgentTask, TaskAnalyzer, TaskPlan
+from astrbot_orchestrator_v5.orchestrator.task_analyzer import (
+    AgentTask,
+    TaskAnalyzer,
+    TaskPlan,
+)
 
 if TYPE_CHECKING:
     from _pytest.capture import CaptureFixture
