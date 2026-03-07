@@ -1226,8 +1226,8 @@ class CommandHandlers:
 
         if not data_dir:
             try:
-                from astrbot.core.utils.astrbot_path import (
-                    get_astrbot_data_path,  # type: ignore[import-not-found]
+                from astrbot.core.utils.astrbot_path import (  # type: ignore[import-not-found]
+                    get_astrbot_data_path,
                 )
             except ImportError:
                 return None
