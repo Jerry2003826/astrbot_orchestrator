@@ -1226,7 +1226,9 @@ class CommandHandlers:
 
         if not data_dir:
             try:
-                from astrbot.core.utils.astrbot_path import get_astrbot_data_path  # type: ignore[import-not-found]
+                from astrbot.core.utils.astrbot_path import (
+                    get_astrbot_data_path,  # type: ignore[import-not-found]
+                )
             except ImportError:
                 return None
             data_dir = os.path.join(get_astrbot_data_path(), "astrbot_orchestrator_v5")
