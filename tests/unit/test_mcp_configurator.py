@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import builtins
 import json
-import socket
 from pathlib import Path
+import socket
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any
 

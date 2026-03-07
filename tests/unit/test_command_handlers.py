@@ -984,7 +984,9 @@ async def test_command_handlers_debug_requires_admin_and_writes_audit_log(
     fake_event.role = "member"
     fake_event.message_str = "status"
 
-    assert await collect_results(handlers.handle_debug(fake_event)) == ["❌ 只有管理员可以使用 Debug"]
+    assert await collect_results(handlers.handle_debug(fake_event)) == [
+        "❌ 只有管理员可以使用 Debug"
+    ]
 
     audit_log_path = tmp_path / "security_audit.jsonl"
     records = [json.loads(line) for line in audit_log_path.read_text(encoding="utf-8").splitlines()]

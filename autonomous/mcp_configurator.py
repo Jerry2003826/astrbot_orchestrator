@@ -74,7 +74,9 @@ class MCPConfiguratorTool:
         port = parsed.port or 443
 
         try:
-            candidate_ips = {item[4][0] for item in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)}
+            candidate_ips = {
+                item[4][0] for item in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+            }
         except socket.gaierror as exc:
             raise ValueError(f"MCP 服务主机名无法解析: {hostname}") from exc
 
@@ -105,7 +107,10 @@ class MCPConfiguratorTool:
                 raise ValueError("请求头名称和值不能为空")
             if any(token in name or token in value for token in ("\r", "\n")):
                 raise ValueError("请求头不能包含换行")
-            if name.lower() in _SENSITIVE_HEADER_NAMES and _ENV_HEADER_PATTERN.fullmatch(value) is None:
+            if (
+                name.lower() in _SENSITIVE_HEADER_NAMES
+                and _ENV_HEADER_PATTERN.fullmatch(value) is None
+            ):
                 raise ValueError(f"敏感请求头 `{name}` 必须使用环境变量引用")
             normalized[name] = value
         return normalized
@@ -280,7 +285,9 @@ class MCPConfiguratorTool:
         server_config = config["mcpServers"][name]
         url = server_config.get("url", "")
         transport = server_config.get("transport", "sse")
-        headers = self._resolve_runtime_headers(cast(dict[str, str], server_config.get("headers", {})))
+        headers = self._resolve_runtime_headers(
+            cast(dict[str, str], server_config.get("headers", {}))
+        )
         self._validate_server_url(url)
 
         try:

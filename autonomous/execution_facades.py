@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+import logging
 from typing import Any, cast
 
 from ..sandbox import CodeSandbox, ExecChunk, ExecResult, SandboxFile

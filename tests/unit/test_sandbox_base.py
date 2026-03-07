@@ -148,7 +148,7 @@ async def test_code_sandbox_file_from_url_runs_download_script() -> None:
     assert (
         'async with client.stream(\'GET\', "https://example.com/file?q=\\"x\\"")' in executed_code
     )
-    assert 'with open("assets/\\"logo\\".png", \'wb\') as f:' in executed_code
+    assert 'with open("/workspace/demo/assets/\\"logo\\".png", \'wb\') as f:' in executed_code
     assert kernel == "ipython"
     assert timeout is None
     assert cwd is None

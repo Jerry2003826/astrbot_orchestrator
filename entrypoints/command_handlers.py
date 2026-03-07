@@ -1188,9 +1188,7 @@ class CommandHandlers:
             "actor_id": self._get_actor_id(event),
             "role": self._sanitize_audit_value(getattr(event, "role", "")),
             "session_id": self._sanitize_audit_value(getattr(event, "session_id", "")),
-            "message_origin": self._sanitize_audit_value(
-                getattr(event, "unified_msg_origin", "")
-            ),
+            "message_origin": self._sanitize_audit_value(getattr(event, "unified_msg_origin", "")),
             "target": self._sanitize_audit_value(target),
             "detail": self._sanitize_audit_value(detail),
         }
@@ -1205,7 +1203,11 @@ class CommandHandlers:
             except OSError as exc:
                 logger.warning("写入安全审计日志失败: %s", exc)
 
-        log_method = audit_logger.warning if outcome in {"denied", "error", "rate_limited"} else audit_logger.info
+        log_method = (
+            audit_logger.warning
+            if outcome in {"denied", "error", "rate_limited"}
+            else audit_logger.info
+        )
         log_method("security_audit %s", serialized)
 
     def _get_audit_log_path(self) -> str | None:
