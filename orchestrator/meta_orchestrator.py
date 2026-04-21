@@ -133,7 +133,7 @@ class MetaOrchestrator:
                 f"\n\n💾 **项目绝对路径:** `{export_path}`"
                 f"\n📥 **下载/查看方式:**"
                 f"\n  - 查看文件: `/exec cat {export_path}/<文件名>`"
-                f"\n  - 打包下载: `/exec cd {export_path} && tar czf /workspace/project.tar.gz .`"
+                f"\n  - 打包下载: `/exec cd {export_path} && tar czf /tmp/project.tar.gz .`"
                 f"\n  - 列出文件: `/exec ls -la {export_path}/`"
                 f"\n💡 文件已保存到 AstrBot 数据目录，不会因沙盒销毁而丢失"
             )
@@ -156,7 +156,7 @@ class MetaOrchestrator:
                     f"\n\n💾 **项目绝对路径:** `{export_path}`"
                     f"\n📥 **下载/查看方式:**"
                     f"\n  - 查看文件: `/exec cat {export_path}/<文件名>`"
-                    f"\n  - 打包下载: `/exec cd {export_path} && tar czf /workspace/project.tar.gz .`"
+                    f"\n  - 打包下载: `/exec cd {export_path} && tar czf /tmp/project.tar.gz .`"
                     f"\n  - 列出文件: `/exec ls -la {export_path}/`"
                 )
                 logger.info("步骤4完成（沙盒导出）: %d 个文件", len(saved_files))
@@ -204,6 +204,7 @@ class MetaOrchestrator:
                 executor = self.coordinator.capability_builder.executor
                 if executor:
                     project_name = f"project_{int(time.time())}"
+                    # 不强制指定 base_path，由 CodeWriter 选择会话独享 cwd。
                     written_files = cast(
                         list[str],
                         await self.artifact_service.write_output_to_workspace(
@@ -211,7 +212,6 @@ class MetaOrchestrator:
                             executor=executor,
                             event=event,
                             project_name=project_name,
-                            base_path="/workspace",
                         ),
                     )
                     if written_files:
@@ -277,6 +277,7 @@ print("hello")
                 executor = self.coordinator.capability_builder.executor
                 if executor:
                     project_name = f"project_{int(time.time())}"
+                    # 不强制指定 base_path，由 CodeWriter 选择会话独享 cwd。
                     written_files = cast(
                         list[str],
                         await self.artifact_service.write_output_to_workspace(
@@ -284,7 +285,6 @@ print("hello")
                             executor=executor,
                             event=event,
                             project_name=project_name,
-                            base_path="/workspace",
                         ),
                     )
                     if written_files:

@@ -28,8 +28,11 @@ if TYPE_CHECKING:
     )
 
 
+# 注意：该命令现在由 ArtifactService._build_list_command 动态拼接，顺序为
+# sandbox.cwd（如有） → /workspace → /home/ship_*/workspace。FakeSandbox 没有
+# cwd 属性，因此只会有后两个回退根。
 LIST_SANDBOX_FILES_COMMAND = (
-    "find /home/ship_*/workspace /workspace -type f "
+    "find /workspace /home/ship_*/workspace -type f "
     "-not -path '*/.git/*' -not -path '*/__pycache__/*' "
     "-not -name '*.pyc' -not -path '*/skills/*' "
     "2>/dev/null | head -200"
@@ -453,3 +456,119 @@ async def test_artifact_service_export_sandbox_files_skips_local_write_failure(
         "saved_files": [],
         "total": 0,
     }
+
+
+class FakeSandboxWithCwd(FakeSandbox):
+    """附带 ``cwd`` 属性的沙盒替身。"""
+
+    def __init__(
+        self,
+        command_results: dict[str, FakeSandboxResult | Exception],
+        cwd: str,
+    ) -> None:
+        super().__init__(command_results)
+        self.cwd = cwd
+
+
+def test_artifact_service_scan_roots_prepends_sandbox_cwd() -> None:
+    """会话沙盒的 cwd 必须作为最长前缀排在前面，以便正确剥离相对路径。"""
+
+    class _Sandbox:
+        cwd = "/workspace/sessions/abc123"
+
+    roots = ArtifactService._scan_roots(_Sandbox())
+
+    assert roots[0] == "/workspace/sessions/abc123"
+    assert "/workspace" in roots
+    assert "/home/ship_*/workspace" in roots
+
+
+def test_artifact_service_scan_roots_handles_missing_cwd() -> None:
+    """沙盒没有 cwd 时不应注入空字符串根。"""
+
+    class _Sandbox:
+        cwd = ""
+
+    roots = ArtifactService._scan_roots(_Sandbox())
+
+    assert roots == ("/workspace", "/home/ship_*/workspace")
+
+
+def test_artifact_service_relative_to_roots_prefers_longest_match() -> None:
+    """计算相对路径时应选择包含目标的最长根，避免 sessions/<hash> 被带入。"""
+
+    roots = ("/workspace/sessions/abc123", "/workspace", "/home/ship_*/workspace")
+
+    assert (
+        ArtifactService._relative_to_roots("/workspace/sessions/abc123/src/app.py", roots)
+        == "src/app.py"
+    )
+    # 不属于任何根的路径应回归到 basename。
+    assert ArtifactService._relative_to_roots("/tmp/stuff/foo.py", roots) == "foo.py"
+    # 仅处在 /workspace 根下的路径仍然关于 /workspace，不会错匹配会话前缀。
+    assert ArtifactService._relative_to_roots("/workspace/other/file.py", roots) == "other/file.py"
+
+
+def test_artifact_service_path_under_any_root_handles_glob_fallback() -> None:
+    """含通配符的根在本进程无法展开，应回退到前缀包含判断。"""
+
+    roots = ("/home/ship_*/workspace",)
+
+    assert ArtifactService._path_under_any_root("/home/ship_abc/workspace/a.py", roots) is True
+    assert ArtifactService._path_under_any_root("/elsewhere/file.py", roots) is False
+
+
+def test_artifact_service_build_list_command_quotes_literal_roots_but_preserves_glob() -> None:
+    """硬编码的路径应被转义，含通配符的路径必须保留以供 bash 展开。"""
+
+    cmd = ArtifactService._build_list_command(
+        ("/workspace/sessions/abc 123", "/workspace", "/home/ship_*/workspace"),
+    )
+
+    assert "'/workspace/sessions/abc 123'" in cmd
+    assert "/home/ship_*/workspace" in cmd
+    # 包含通配符的根不应被单引号包裹，否则 bash 不会展开。
+    assert "'/home/ship_*/workspace'" not in cmd
+
+
+@pytest.mark.asyncio
+async def test_artifact_service_export_sandbox_files_strips_session_prefix(
+    tmp_path: Path,
+) -> None:
+    """会话独享 cwd 下的文件导出时应剥离 sessions/<hash>/ 前缀。"""
+
+    session_cwd = "/workspace/sessions/deadbeef"
+    safe_remote = f"{session_cwd}/src/app.py"
+    expected_cmd = (
+        f"find {session_cwd} /workspace /home/ship_*/workspace -type f "
+        "-not -path '*/.git/*' -not -path '*/__pycache__/*' "
+        "-not -name '*.pyc' -not -path '*/skills/*' "
+        "2>/dev/null | head -200"
+    )
+    sandbox = FakeSandboxWithCwd(
+        command_results={
+            expected_cmd: FakeSandboxResult(text=f"{safe_remote}\n", exit_code=0),
+            f"cat {quote_shell_path(safe_remote)} 2>/dev/null": FakeSandboxResult(
+                text="print('session-only')",
+                exit_code=0,
+            ),
+        },
+        cwd=session_cwd,
+    )
+    service = ArtifactService(persist_dir=str(tmp_path))
+    executor = FakeSandboxExecutor(sandbox=sandbox)
+
+    result = await service.export_sandbox_files(
+        executor=executor,
+        event=object(),
+        project_name="Demo Project",
+        created_files=[],
+    )
+
+    assert result["success"] is True
+    # 关键断言：未包含 sessions/deadbeef/ 前缀。
+    assert result["saved_files"] == ["src/app.py"]
+    assert (tmp_path / "demo_project" / "src" / "app.py").read_text(encoding="utf-8") == (
+        "print('session-only')"
+    )
+    assert not (tmp_path / "demo_project" / "sessions").exists()

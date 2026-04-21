@@ -347,12 +347,14 @@ class AgentCoordinator:
                         # 生成项目名称（基于时间戳）
                         project_name = f"project_{int(time.time())}"
 
+                        # 不强制指定 base_path，让 CodeWriter 根据当前会话沙盒的 cwd
+                        # 选择会话独享的 /workspace/sessions/<hash> 目录，
+                        # 避免所有会话挤到共享的 /workspace。
                         written_files = await self.artifact_service.write_files_to_workspace(
                             files=files,
                             executor=executor,
                             event=event,
                             project_name=project_name,
-                            base_path="/workspace",
                         )
 
                         if written_files:
@@ -476,8 +478,10 @@ class AgentCoordinator:
             for f in self.all_created_files:
                 lines.append(f"  - `{f}`")
             lines.append("")
-            lines.append("💡 文件已保存到沙盒的 /workspace/ 目录")
-            lines.append("💡 可通过宝塔面板 → 文件 → /www/wwwroot/downloads/ 下载")
+            # 实际写入路径会因会话 sandbox.cwd 而不同，不再误导用户认为固定在
+            # /workspace/。用户可从具体的文件路径列表看到实际位置。
+            lines.append("💡 文件已保存到沙盒工作目录（以上列表中的完整路径）")
+            lines.append("💡 如需持久化到宿主机，请配置插件的本地持久化目录")
         else:
             # 没有文件被创建时给出提示
             lines.append("")

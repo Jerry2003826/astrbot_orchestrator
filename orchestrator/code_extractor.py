@@ -8,7 +8,7 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
-from ..shared import UnsafePathError, sanitize_relative_path
+from ..shared import UnsafePathError, quote_shell_path, sanitize_relative_path
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +334,11 @@ class ProjectExporter:
         self.base_export_path = base_export_path
 
     async def export_from_sandbox(
-        self, executor, event, project_name: str, sandbox_path: str = "/home/ship_*/workspace"
+        self,
+        executor,
+        event,
+        project_name: str,
+        sandbox_path: str = "/workspace",
     ) -> Tuple[bool, str]:
         """
         从沙盒导出项目到宝塔目录
@@ -343,21 +347,22 @@ class ProjectExporter:
             executor: 执行管理器
             event: 消息事件
             project_name: 项目名称
-            sandbox_path: 沙盒中的项目路径
+            sandbox_path: 沙盒中的项目路径。默认为 ``/workspace``——有意义的固定工
+                作目录。**不**接受 glob（如 ``/home/ship_*/workspace``），因为在调用
+                ``ls`` / ``cd`` 时 glob 展开完全取决于运行时环境，且同时匹配多个
+                路径时 ``cd`` 会报错。
 
         Returns:
             (success, message)
         """
         try:
-            # 在宝塔服务器上创建目录
-            # 注意：这里需要通过 Docker exec 在宿主机上操作
-            # 因为沙盒是独立的容器
+            safe_path = quote_shell_path(sandbox_path)
 
-            # 1. 先在沙盒中列出文件
-            await executor.execute(f"ls -la {sandbox_path}", event)
+            # 1. 在沙盒中列出文件
+            await executor.execute(f"ls -la {safe_path}", event)
 
             # 2. 打包文件
-            tar_cmd = f"cd {sandbox_path} && tar -czf /tmp/project.tar.gz ."
+            tar_cmd = f"cd {safe_path} && tar -czf /tmp/project.tar.gz ."
             await executor.execute(tar_cmd, event)
 
             # 3. 返回打包文件路径
@@ -375,29 +380,56 @@ class ProjectExporter:
 class CodeWriter:
     """代码写入器 - 将代码写入沙盒文件系统"""
 
-    def __init__(self, executor, base_path: str = "/workspace"):
+    # 调用者没有显式指定基路径时使用的回退值。仅在无法从沙盒读取 cwd 时
+    # 才会真正落到这个值，从而避免将明确的显式传入的 "/workspace" 与 "使用
+    # 会话 cwd" 两种意图混淆在同一个值里。
+    DEFAULT_FALLBACK_BASE_PATH: str = "/workspace"
+
+    def __init__(self, executor, base_path: str | None = None):
+        """初始化写入器。
+
+        Args:
+            executor: 拥有 ``get_sandbox`` / ``write_file`` 等方法的执行器。
+            base_path: 显式指定的写入基路径。传 ``None``（默认）表示直接使用沙
+                盒 ``cwd``，在获取失败时回退到 ``DEFAULT_FALLBACK_BASE_PATH``。
+        """
+
         self.executor = executor
-        self.base_path = base_path
+        self._explicit_base_path: Optional[str] = base_path
+        # 保留 ``base_path`` 属性以兼容现有行为：其他代码可以在写入前读取当
+        # 前指定的基路径。未显式指定时仍然导出回退值，避免旧调用点看到
+        # ``None``。
+        self.base_path = base_path or self.DEFAULT_FALLBACK_BASE_PATH
 
     async def _resolve_base_path(self, event) -> str:
-        """优先使用当前会话沙盒的工作目录，避免共享 /workspace。"""
+        """解析写入基路径。
 
-        if self.base_path != "/workspace":
-            return self.base_path
+        优先级：
+        1. ``__init__`` 时显式传入的 ``base_path``（即使为 ``/workspace``，也尊重
+           调用方的显式选择）。
+        2. 当前会话沙盒的 ``cwd``，用于会话独享的工作目录。
+        3. 回退到 ``DEFAULT_FALLBACK_BASE_PATH``。
+        """
+
+        if self._explicit_base_path is not None:
+            return self._explicit_base_path
 
         get_sandbox = getattr(self.executor, "get_sandbox", None)
         if not callable(get_sandbox):
-            return self.base_path
+            return self.DEFAULT_FALLBACK_BASE_PATH
 
         try:
             sandbox = await get_sandbox(event=event)
         except TypeError:
-            sandbox = await get_sandbox(event)
+            try:
+                sandbox = await get_sandbox(event)
+            except Exception:
+                return self.DEFAULT_FALLBACK_BASE_PATH
         except Exception:
-            return self.base_path
+            return self.DEFAULT_FALLBACK_BASE_PATH
 
         cwd = getattr(sandbox, "cwd", "")
-        return str(cwd) if cwd else self.base_path
+        return str(cwd) if cwd else self.DEFAULT_FALLBACK_BASE_PATH
 
     async def write_files(
         self, files: Dict[str, str], event, project_name: str = "project"

@@ -5,12 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import os
+import posixpath
 from typing import Any, Mapping, cast
 
 from ..orchestrator.code_extractor import CodeExtractor, CodeWriter
 from ..shared import UnsafePathError, ensure_within_base, quote_shell_path, slugify_identifier
 
 logger = logging.getLogger(__name__)
+
+# 扫描沙盒文件时允许的候选工作目录前缀
+# 这些目录会被动态拼接到 `find` 命令，且在计算相对路径时被剥离。
+_FALLBACK_SANDBOX_ROOTS: tuple[str, ...] = ("/workspace", "/home/ship_*/workspace")
 
 
 @dataclass(slots=True)
@@ -113,9 +118,13 @@ class ArtifactService:
         executor: Any,
         event: Any,
         project_name: str,
-        base_path: str = "/workspace",
+        base_path: str | None = None,
     ) -> list[str]:
-        """将文件写入工作区/沙盒目录。"""
+        """将文件写入工作区/沙盒目录。
+
+        ``base_path`` 为 ``None`` 时（默认），``CodeWriter`` 会解析当前会话沙盒
+        实际的工作目录作为写入基点，避免所有会话挤到共享 ``/workspace``。
+        """
 
         if not files:
             return []
@@ -134,7 +143,7 @@ class ArtifactService:
         executor: Any,
         event: Any,
         project_name: str,
-        base_path: str = "/workspace",
+        base_path: str | None = None,
     ) -> list[str]:
         """从文本中提取代码并写入工作区/沙盒目录。"""
 
@@ -167,22 +176,20 @@ class ArtifactService:
         os.makedirs(local_project_dir, exist_ok=True)
         saved_files: list[str] = []
 
+        scan_roots = self._scan_roots(sandbox)
+
         try:
-            list_result = await sandbox.aexec(
-                "find /home/ship_*/workspace /workspace -type f "
-                "-not -path '*/.git/*' -not -path '*/__pycache__/*' "
-                "-not -name '*.pyc' -not -path '*/skills/*' "
-                "2>/dev/null | head -200",
-                kernel="bash",
-            )
+            list_cmd = self._build_list_command(scan_roots)
+            list_result = await sandbox.aexec(list_cmd, kernel="bash")
             all_files: list[str] = []
             if list_result.text:
                 for line in list_result.text.strip().splitlines():
                     line = line.strip()
-                    # 黑名单过滤：只排除明确不需要的内容，避免无后缀文件（Makefile/Dockerfile/README）被丢弃
+                    # 黑名单过滤：只排除明确不需要的内容，避免无后缀文件
+                    # （Makefile/Dockerfile/README）被丢弃。
                     if (
                         line
-                        and "/workspace/" in line
+                        and self._path_under_any_root(line, scan_roots)
                         and not line.endswith(".pyc")
                         and "__pycache__" not in line
                     ):
@@ -194,11 +201,7 @@ class ArtifactService:
 
             for remote_path in all_files:
                 try:
-                    if "/workspace/" in remote_path:
-                        rel_path = remote_path.split("/workspace/", 1)[1]
-                    else:
-                        rel_path = os.path.basename(remote_path)
-
+                    rel_path = self._relative_to_roots(remote_path, scan_roots)
                     if not rel_path:
                         continue
 
@@ -234,3 +237,76 @@ class ArtifactService:
             "saved_files": saved_files,
             "total": len(saved_files),
         }
+
+    @staticmethod
+    def _scan_roots(sandbox: Any) -> tuple[str, ...]:
+        """根据沙盒实际工作目录构造搜索根列表，保留原有回退前缀。
+
+        会话独享的 ``/workspace/sessions/<hash>`` 目录必须作为最长前缀排在前面，
+        以便在计算相对路径时优先剑离它们而不是通用的 ``/workspace``。
+        """
+
+        cwd = str(getattr(sandbox, "cwd", "") or "").rstrip("/")
+        roots: list[str] = []
+        if cwd:
+            roots.append(cwd)
+        for candidate in _FALLBACK_SANDBOX_ROOTS:
+            if candidate and candidate not in roots:
+                roots.append(candidate)
+        return tuple(roots)
+
+    @staticmethod
+    def _build_list_command(scan_roots: tuple[str, ...]) -> str:
+        """根据候选根目录拼接 find 命令。
+
+        包含通配符的根（如 ``/home/ship_*/workspace``）不转义，交由 bash 展开；
+        其余根全部转义以防止空格/元字符注入。
+        """
+
+        parts: list[str] = []
+        for root in scan_roots:
+            if "*" in root or "?" in root:
+                parts.append(root)
+            else:
+                parts.append(quote_shell_path(root))
+        roots_str = " ".join(parts)
+        return (
+            f"find {roots_str} -type f "
+            "-not -path '*/.git/*' -not -path '*/__pycache__/*' "
+            "-not -name '*.pyc' -not -path '*/skills/*' "
+            "2>/dev/null | head -200"
+        )
+
+    @staticmethod
+    def _path_under_any_root(path: str, scan_roots: tuple[str, ...]) -> bool:
+        """判断路径是否属于任一候选根。"""
+
+        for root in scan_roots:
+            if not root:
+                continue
+            # /home/ship_*/workspace 类 glob 根在本进程无法展开，回退到包含判断。
+            if "*" in root:
+                needle = root.split("*", 1)[0]
+                if needle and needle in path:
+                    return True
+                continue
+            prefix = root.rstrip("/") + "/"
+            if path == root or path.startswith(prefix):
+                return True
+        return False
+
+    @staticmethod
+    def _relative_to_roots(path: str, scan_roots: tuple[str, ...]) -> str:
+        """将绝对路径换算为相对于包含它的最长根目录的路径。"""
+
+        best_match = ""
+        for root in scan_roots:
+            if not root or "*" in root:
+                continue
+            prefix = root.rstrip("/") + "/"
+            if path == root or path.startswith(prefix):
+                if len(prefix) > len(best_match):
+                    best_match = prefix
+        if best_match:
+            return path[len(best_match) :]
+        return posixpath.basename(path)

@@ -790,4 +790,7 @@ def test_agent_coordinator_build_response_covers_verbose_output_and_file_summary
     assert response["status"] == "success"
     assert "full verbose output" in response["answer"]
     assert "📁 **编程完成！已创建文件:**" in response["answer"]
-    assert "💡 文件已保存到沙盒的 /workspace/ 目录" in response["answer"]
+    # 消息不再制造“文件在 /workspace/”的虚假断言，改为指向实际保存的文件列表。
+    assert "💡 文件已保存到沙盒工作目录（以上列表中的完整路径）" in response["answer"]
+    # 不再硬编码宝塔目录路径，改为提示用户配置持久化目录。
+    assert "如需持久化到宿主机" in response["answer"]

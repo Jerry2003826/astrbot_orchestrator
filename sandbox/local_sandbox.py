@@ -264,3 +264,14 @@ class LocalSandbox(CodeSandbox):
             kernel="bash",
         )
         return result.text.strip().splitlines() if result.text else []
+
+    async def arestart(self) -> None:
+        """重启本地沙盒。
+
+        ``LocalSandbox`` 每次通过 ``python3 -c`` 启动新子进程，不存在 IPython
+        内核的 magic 命令系统。父类的 ``%restart`` 实现在 ``python3 -c`` 运行
+        时会抛出语法错误，这里重写为幂等的 start/stop 循环。
+        """
+
+        await self.astop()
+        await self.astart()

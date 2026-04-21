@@ -703,7 +703,7 @@ class DynamicOrchestrator:
 **💾 下载说明:**
 文件已保存到 AstrBot 数据目录，可通过以下方式获取：
 1. 查看文件: `/exec cat {project_abs_path}/<文件名>`
-2. 打包下载: `/exec cd {project_abs_path} && tar czf /workspace/project.tar.gz .`
+2. 打包下载: `/exec cd {project_abs_path} && tar czf /tmp/project.tar.gz .`
 3. 运行程序: `/exec python {project_abs_path}/main.py`
 4. 如果是 Web 应用，访问对应端口
 
