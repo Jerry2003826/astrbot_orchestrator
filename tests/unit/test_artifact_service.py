@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 LIST_SANDBOX_FILES_COMMAND = (
     "find /home/ship_*/workspace /workspace -type f "
-    "-not -path '*/\\.git/*' -not -path '*/__pycache__/*' "
+    "-not -path '*/.git/*' -not -path '*/__pycache__/*' "
     "-not -name '*.pyc' -not -path '*/skills/*' "
     "2>/dev/null | head -200"
 )
