@@ -170,7 +170,7 @@ class ArtifactService:
         try:
             list_result = await sandbox.aexec(
                 "find /home/ship_*/workspace /workspace -type f "
-                "-not -path '*/\\.git/*' -not -path '*/__pycache__/*' "
+                "-not -path '*/.git/*' -not -path '*/__pycache__/*' "
                 "-not -name '*.pyc' -not -path '*/skills/*' "
                 "2>/dev/null | head -200",
                 kernel="bash",
@@ -179,10 +179,12 @@ class ArtifactService:
             if list_result.text:
                 for line in list_result.text.strip().splitlines():
                     line = line.strip()
+                    # 黑名单过滤：只排除明确不需要的内容，避免无后缀文件（Makefile/Dockerfile/README）被丢弃
                     if (
                         line
                         and "/workspace/" in line
-                        and ("project_" in line or "." in os.path.basename(line))
+                        and not line.endswith(".pyc")
+                        and "__pycache__" not in line
                     ):
                         all_files.append(line)
 
