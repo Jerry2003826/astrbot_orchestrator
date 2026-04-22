@@ -272,7 +272,10 @@ class AstrBotSkillLoader:
             skills = self._scan_skills_directory()
 
         self._skills_cache = skills
-        self._cache_valid = True
+        # 仅在成功登载到非空 Skills 时才缓存，避免首次调用时
+        # SkillManager 尚未就绪导致本会话永久返回空列表
+        if skills:
+            self._cache_valid = True
 
         logger.info(f"共发现 {len(skills)} 个 Skills")
 

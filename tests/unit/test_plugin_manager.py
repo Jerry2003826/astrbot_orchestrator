@@ -304,7 +304,9 @@ async def test_plugin_manager_fetch_registry_handles_non_200_and_total_failure(
     empty_result = await tool._fetch_plugin_registry()
 
     assert empty_result == []
-    assert tool._cache_valid is True
+    # Round 4 Bug U 修复：空结果不应被标记为缓存有效，
+    # 以允许下次调用重试源，而不是本会话永久返回空列表。
+    assert tool._cache_valid is False
     assert len(non_200_session.get_calls) == 1
 
     tool.invalidate_cache()
@@ -316,7 +318,7 @@ async def test_plugin_manager_fetch_registry_handles_non_200_and_total_failure(
     failed_result = await tool._fetch_plugin_registry()
 
     assert failed_result == []
-    assert tool._cache_valid is True
+    assert tool._cache_valid is False
 
 
 @pytest.mark.asyncio

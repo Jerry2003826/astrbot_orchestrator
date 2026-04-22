@@ -306,10 +306,14 @@ class ShipyardSandbox(CodeSandbox):
 
     async def ainstall(self, *packages: str) -> str:
         """在 Shipyard 沙盒中安装 Python 包"""
-        pkg_str = " ".join(packages)
-        result = await self.aexec(f"pip install {pkg_str}", kernel="bash")
+        if not packages:
+            return "未指定要安装的包"
+        # 使用 shlex.quote 对每个包名做 shell 转义，防止注入
+        quoted = " ".join(shlex.quote(pkg) for pkg in packages)
+        pkg_display = " ".join(packages)
+        result = await self.aexec(f"pip install {quoted}", kernel="bash")
         if result.success:
-            return f"{pkg_str} installed successfully"
+            return f"{pkg_display} installed successfully"
         return f"安装失败: {result.errors}"
 
     async def alist_packages(self) -> t.List[str]:
