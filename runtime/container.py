@@ -76,31 +76,56 @@ class RuntimeContainer:
             logger.debug("停止执行器资源失败，忽略并继续: %s", exc)
 
     def _get_plugin_projects_dir(self) -> str:
-        """获取插件的项目存储目录（在插件目录下的 projects 文件夹）。"""
-        import os
+        """获取插件的项目存储目录。
 
-        # 尝试获取插件目录
-        # 方法1: 从 context 获取
+        优先级:
+            1. `ASTRBOT_DATA_DIR` 环境变量 (容器/自定义部署)
+            2. `context.get_plugin_data_dir()` — AstrBot 新版注入的插件独立数据目录
+            3. `<cwd>/data/agent_projects` — `astrbot init` 后的标准布局
+            4. 最后才回退到 `/AstrBot/data/agent_projects` (官方 Docker 镜像约定)
+        """
+        import os
+        from pathlib import Path
+
+        candidates: list[str] = []
+
+        env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
+        if env_root:
+            candidates.append(os.path.join(env_root, "agent_projects"))
+
         plugin_dir = None
         if hasattr(self.context, "get_plugin_data_dir"):
             try:
                 plugin_dir = self.context.get_plugin_data_dir()
             except Exception as exc:
-                logger.debug("获取插件数据目录失败，使用回退路径: %s", exc)
+                logger.debug("获取插件数据目录失败，尝试回退: %s", exc)
+        if plugin_dir:
+            candidates.append(os.path.join(str(plugin_dir), "projects"))
 
-        # 方法2: 使用 AstrBot 标准路径
-        if not plugin_dir:
-            projects_dir = "/AstrBot/data/agent_projects"
-        else:
-            projects_dir = os.path.join(str(plugin_dir), "projects")
+        cwd_data = Path.cwd() / "data" / "agent_projects"
+        candidates.append(str(cwd_data))
 
-        try:
-            os.makedirs(projects_dir, exist_ok=True)
-        except OSError:
-            pass
+        candidates.append("/AstrBot/data/agent_projects")
 
-        logger.info("插件项目目录: %s", projects_dir)
-        return projects_dir
+        chosen: str | None = None
+        for path in candidates:
+            try:
+                os.makedirs(path, exist_ok=True)
+            except OSError as exc:
+                logger.debug("无法在 %s 创建 agent_projects: %s", path, exc)
+                continue
+            chosen = path
+            break
+
+        if chosen is None:
+            # 所有候选都不可写 —— 回退到自带的臨时目录,确保不再抛出
+            import tempfile
+
+            chosen = tempfile.mkdtemp(prefix="astrbot_orchestrator_projects_")
+            logger.warning("所有标准位置都不可写，使用临时目录: %s", chosen)
+
+        logger.info("插件项目目录: %s", chosen)
+        return chosen
 
     def _build_core_tools(self) -> None:
         """构建与副作用相关的基础工具。"""

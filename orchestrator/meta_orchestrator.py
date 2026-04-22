@@ -43,24 +43,51 @@ class MetaOrchestrator:
             persist_dir = self._get_plugin_projects_dir()
             self.artifact_service = ArtifactService(persist_dir)
 
-        # 确保持久化目录存在
+        # 确保持久化目录存在 — 失败时降级到临时目录,而不是直接崩溃插件
         _persist_dir = getattr(self.artifact_service, "persist_dir", None)
         if _persist_dir:
-            os.makedirs(_persist_dir, exist_ok=True)
+            try:
+                os.makedirs(_persist_dir, exist_ok=True)
+            except OSError as exc:
+                import tempfile
+
+                fallback = tempfile.mkdtemp(prefix="astrbot_orchestrator_projects_")
+                logger.warning(
+                    "无法创建持久化目录 %s (%s),回退到临时目录 %s",
+                    _persist_dir,
+                    exc,
+                    fallback,
+                )
+                try:
+                    self.artifact_service.persist_dir = fallback
+                except Exception:
+                    # ArtifactService 暂时不持久化,但不阻断启动
+                    pass
 
     def _get_plugin_projects_dir(self) -> str:
-        """获取插件的项目存储目录。"""
+        """获取插件的项目存储目录。
+
+        这里是 `RuntimeContainer` 未注入 `artifact_service` 时的回退。
+        与 `RuntimeContainer._get_plugin_projects_dir` 保持相同的优先级:
+        `PERSIST_DIR` > `ASTRBOT_DATA_DIR` > `<cwd>/data/agent_projects` > 插件目录 > 临时目录。
+        """
         if self.PERSIST_DIR:
             return self.PERSIST_DIR
 
         from pathlib import Path
 
-        # 从当前文件位置推断插件目录
-        current_file = Path(__file__).resolve()
-        plugin_root = current_file.parent.parent  # astrbot_orchestrator_v5 目录
-        projects_dir = plugin_root / "projects"
+        env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
+        if env_root:
+            return os.path.join(env_root, "agent_projects")
 
-        return str(projects_dir)
+        cwd_data = Path.cwd() / "data" / "agent_projects"
+        if cwd_data.parent.exists():
+            return str(cwd_data)
+
+        # 最后回退: 插件包目录下的 projects
+        current_file = Path(__file__).resolve()
+        plugin_root = current_file.parent.parent
+        return str(plugin_root / "projects")
 
     async def process(
         self,

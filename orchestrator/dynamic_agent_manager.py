@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import os
+from pathlib import Path
 from typing import Any, cast
 
 from astrbot.api import logger as astrbot_logger
@@ -17,8 +19,24 @@ from .agent_templates import AgentSpec, AgentTemplateLibrary
 
 logger = astrbot_logger
 
-CONFIG_PATH = "/AstrBot/data/cmd_config.json"
-PLUGIN_CONFIG_PATH = "/AstrBot/data/config/astrbot_orchestrator_config.json"
+
+def _resolve_astrbot_data_root() -> Path:
+    """解析 AstrBot `data/` 根目录,兼容官方 Docker 和本地 `astrbot init` 两种布局。"""
+
+    env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
+    if env_root:
+        return Path(env_root)
+
+    cwd_data = Path.cwd() / "data"
+    if cwd_data.exists():
+        return cwd_data
+
+    return Path("/AstrBot/data")  # 官方 Docker 镜像回退
+
+
+_DATA_ROOT = _resolve_astrbot_data_root()
+CONFIG_PATH = str(_DATA_ROOT / "cmd_config.json")
+PLUGIN_CONFIG_PATH = str(_DATA_ROOT / "config" / "astrbot_orchestrator_config.json")
 
 
 def _utcnow() -> datetime:
