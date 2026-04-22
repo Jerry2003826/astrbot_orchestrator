@@ -98,7 +98,10 @@ class PluginManagerTool:
             logger.error(f"获取插件列表失败: {e}")
 
         self._plugin_cache = plugins
-        self._cache_valid = True
+        # 仅在成功获取到非空列表时才标记缓存有效，
+        # 避免网络暂时故障导致本次会话永久返回空列表
+        if plugins:
+            self._cache_valid = True
         return plugins
 
     async def search_plugins(self, keyword: str) -> str:
