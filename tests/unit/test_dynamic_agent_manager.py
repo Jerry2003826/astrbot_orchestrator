@@ -224,7 +224,7 @@ def test_dynamic_agent_manager_provider_and_template_overrides_cover_all_fallbac
         json.dumps({"llm_provider": "provider-from-file"}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "PLUGIN_CONFIG_PATH", str(plugin_config_path))
+    monkeypatch.setattr(module, "_plugin_config_path", lambda _p=str(plugin_config_path): _p)
     assert module._utcnow().tzinfo is not None
 
     direct_manager = module.DynamicAgentManager(
@@ -272,11 +272,11 @@ def test_dynamic_agent_manager_provider_and_template_overrides_cover_all_fallbac
         context=make_context(),
         config={},
     )
-    monkeypatch.setattr(module, "PLUGIN_CONFIG_PATH", str(no_provider_path))
+    monkeypatch.setattr(module, "_plugin_config_path", lambda _p=str(no_provider_path): _p)
     assert no_provider_file_manager._get_default_provider_id() == "openai_1/qwen-max-latest"
 
     default_manager = module.DynamicAgentManager(context=make_context(), config={})
-    monkeypatch.setattr(module, "PLUGIN_CONFIG_PATH", str(tmp_path / "missing.json"))
+    monkeypatch.setattr(module, "_plugin_config_path", lambda _p=str(tmp_path / "missing.json"): _p)
 
     assert default_manager._get_default_provider_id() == "openai_1/qwen-max-latest"
     assert "读取 orchestrator 插件配置失败" in caplog.text
@@ -289,7 +289,7 @@ def test_dynamic_agent_manager_handles_non_dict_runtime_config(
     """运行时传入非字典配置时，应走默认 provider 与空 override。"""
 
     module = load_dynamic_agent_manager_module(monkeypatch)
-    monkeypatch.setattr(module, "PLUGIN_CONFIG_PATH", str(tmp_path / "missing.json"))
+    monkeypatch.setattr(module, "_plugin_config_path", lambda _p=str(tmp_path / "missing.json"): _p)
     manager = module.DynamicAgentManager(
         context=make_context(),
         config=cast(Any, "invalid-config"),
@@ -360,7 +360,7 @@ def test_dynamic_agent_manager_load_base_agents_covers_memory_file_and_error_pat
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "CONFIG_PATH", str(file_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(file_path): _p)
 
     memory_manager = module.DynamicAgentManager(
         context=make_context(
@@ -467,7 +467,7 @@ async def test_dynamic_agent_manager_save_to_memory_and_file_configs_preserve_st
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "CONFIG_PATH", str(file_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(file_path): _p)
     manager = module.DynamicAgentManager(context=make_context())
     manager._dynamic_agents["agent-1"] = make_spec("agent-1", "new_dynamic")
 
@@ -531,7 +531,7 @@ async def test_dynamic_agent_manager_save_to_file_config_handles_missing_section
     fixed_now = datetime(2024, 1, 1, 8, 0, 0)
     monkeypatch.setattr(module, "_utcnow", lambda: fixed_now)
     file_path = tmp_path / "cmd_config.json"
-    monkeypatch.setattr(module, "CONFIG_PATH", str(file_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(file_path): _p)
     manager = module.DynamicAgentManager(context=make_context())
     manager._dynamic_agents["agent-1"] = make_spec("agent-1", "new_dynamic")
 
@@ -621,7 +621,7 @@ async def test_dynamic_agent_manager_remove_from_config_covers_file_and_error_pa
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "CONFIG_PATH", str(file_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(file_path): _p)
 
     manager = module.DynamicAgentManager(context=make_context())
     manager._dynamic_agents["agent-1"] = make_spec("agent-1", "remove_me")
@@ -639,7 +639,7 @@ async def test_dynamic_agent_manager_remove_from_config_covers_file_and_error_pa
 
     missing_section_path = tmp_path / "missing_section.json"
     missing_section_path.write_text(json.dumps({}), encoding="utf-8")
-    monkeypatch.setattr(module, "CONFIG_PATH", str(missing_section_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(missing_section_path): _p)
     await manager._remove_from_config(["agent-1"])
 
     missing_agents_path = tmp_path / "missing_agents.json"
@@ -647,7 +647,7 @@ async def test_dynamic_agent_manager_remove_from_config_covers_file_and_error_pa
         json.dumps({"subagent_orchestrator": {}}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "CONFIG_PATH", str(missing_agents_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(missing_agents_path): _p)
     await manager._remove_from_config(["agent-1"])
 
     caplog.set_level(logging.ERROR, logger=LOGGER_NAME)
@@ -683,7 +683,7 @@ async def test_dynamic_agent_manager_remove_from_config_falls_through_when_memor
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "CONFIG_PATH", str(file_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(file_path): _p)
 
     manager = module.DynamicAgentManager(
         context=make_context(
@@ -728,7 +728,7 @@ async def test_dynamic_agent_manager_remove_from_config_reads_file_when_memory_s
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "CONFIG_PATH", str(file_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(file_path): _p)
     manager = module.DynamicAgentManager(
         context=make_context(get_config=lambda: {"subagent_orchestrator": {}}),
     )
@@ -774,7 +774,7 @@ async def test_dynamic_agent_manager_reload_subagents_covers_warning_success_and
         json.dumps({"subagent_orchestrator": {"agents": [{"name": "file-agent"}]}}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(module, "CONFIG_PATH", str(file_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(file_path): _p)
     file_orchestrator = FakeOrchestrator()
     file_manager = module.DynamicAgentManager(
         context=make_context(orchestrator=file_orchestrator),
@@ -783,7 +783,7 @@ async def test_dynamic_agent_manager_reload_subagents_covers_warning_success_and
     assert file_orchestrator.reload_calls == [{"agents": [{"name": "file-agent"}]}]
 
     missing_file_path = tmp_path / "missing_cmd_config.json"
-    monkeypatch.setattr(module, "CONFIG_PATH", str(missing_file_path))
+    monkeypatch.setattr(module, "_config_path", lambda _p=str(missing_file_path): _p)
     caplog.set_level(logging.ERROR, logger=LOGGER_NAME)
     broken_orchestrator = FakeOrchestrator(reload_error=RuntimeError("reload failed"))
     broken_manager = module.DynamicAgentManager(

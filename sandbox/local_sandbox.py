@@ -15,6 +15,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import shlex
 import tempfile
 import typing as t
 
@@ -180,7 +181,16 @@ class LocalSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
         cwd: t.Optional[str] = None,
     ) -> t.AsyncGenerator[ExecChunk, None]:
-        """本地流式执行代码"""
+        """本地流式执行代码。
+
+        关键修复:
+            1. timeout 真正生效 —— 使用 ``asyncio.wait_for`` 包裹 drain,超时
+               则主动杀掉子进程,避免死循环代码把插件挂死。
+            2. stdout 和 stderr **并发** 读取 —— 先前顺序读取
+               (先读完 stdout 才读 stderr) 在子进程先把 stderr 管道缓冲区
+               (Linux 默认 64KB) 写满时会与 stdout 读取互相死锁。
+        """
+
         timeout = timeout or self.timeout
         work_dir = cwd or self.cwd
 
@@ -189,6 +199,47 @@ class LocalSandbox(CodeSandbox):
         else:
             cmd = ["python3", "-c", code]
 
+        proc: t.Optional[asyncio.subprocess.Process] = None
+        queue: asyncio.Queue[t.Optional[ExecChunk]] = asyncio.Queue()
+        _SENTINEL: t.Optional[ExecChunk] = None
+
+        async def _drain(
+            stream: t.Optional[asyncio.StreamReader],
+            chunk_type: t.Literal["stdout", "stderr"],
+        ) -> None:
+            if stream is None:
+                return
+            # 用 read(n) 分块读取而不是 readline() —— readline 在遇到 >64KB
+            # 不带换行符的数据时会抛 LimitOverrunError。
+            while True:
+                data = await stream.read(4096)
+                if not data:
+                    break
+                await queue.put(
+                    ExecChunk(
+                        type=chunk_type,
+                        content=data.decode("utf-8", errors="replace"),
+                    )
+                )
+
+        async def _runner() -> None:
+            if proc is None:
+                await queue.put(_SENTINEL)
+                return
+            try:
+                # 并发 drain 两个流,再等进程退出
+                await asyncio.gather(
+                    _drain(proc.stdout, "stdout"),
+                    _drain(proc.stderr, "stderr"),
+                    return_exceptions=True,
+                )
+                try:
+                    await proc.wait()
+                except Exception:  # noqa: BLE001
+                    logger.debug("proc.wait 抛出异常，已忽略", exc_info=True)
+            finally:
+                await queue.put(_SENTINEL)
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -196,37 +247,52 @@ class LocalSandbox(CodeSandbox):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=work_dir,
             )
-
-            async def read_stream(
-                stream: asyncio.StreamReader,
-                chunk_type: t.Literal["stdout", "stderr"],
-            ) -> t.AsyncGenerator[ExecChunk, None]:
-                while True:
-                    line = await stream.readline()
-                    if not line:
-                        break
-                    text = line.decode("utf-8", errors="replace")
-                    yield ExecChunk(type=chunk_type, content=text)
-
-            # 交替读取 stdout 和 stderr
-            if proc.stdout:
-                async for chunk in read_stream(proc.stdout, "stdout"):
-                    yield chunk
-
-            if proc.stderr:
-                async for chunk in read_stream(proc.stderr, "stderr"):
-                    yield chunk
-
-            await proc.wait()
-            yield ExecChunk(
-                type="status",
-                content=f"exit_code={proc.returncode}",
-            )
-
-        except asyncio.TimeoutError:
-            yield ExecChunk(type="stderr", content=f"执行超时（{timeout}秒）")
         except Exception as e:
             yield ExecChunk(type="stderr", content=str(e))
+            return
+
+        runner_task = asyncio.create_task(_runner())
+        timed_out = False
+        try:
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    chunk = await asyncio.wait_for(queue.get(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    timed_out = True
+                    break
+                if chunk is _SENTINEL:
+                    break
+                yield chunk
+        finally:
+            if timed_out:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(runner_task, timeout=1.0)
+                except (asyncio.TimeoutError, Exception):
+                    runner_task.cancel()
+                yield ExecChunk(type="stderr", content=f"执行超时（{timeout}秒）")
+                yield ExecChunk(
+                    type="status",
+                    content=f"exit_code={proc.returncode if proc.returncode is not None else -1}",
+                )
+            else:
+                try:
+                    await runner_task
+                except Exception:  # noqa: BLE001
+                    logger.debug("runner_task 抛出异常，已忽略", exc_info=True)
+                yield ExecChunk(
+                    type="status",
+                    content=f"exit_code={proc.returncode}",
+                )
 
     # ── 文件操作 ──────────────────────────────────────────
 
@@ -300,11 +366,19 @@ class LocalSandbox(CodeSandbox):
     # ── 包管理 ────────────────────────────────────────────
 
     async def ainstall(self, *packages: str) -> str:
-        """在本地安装 Python 包"""
-        pkg_str = " ".join(packages)
-        result = await self.aexec(f"pip install {pkg_str}", kernel="bash")
+        """在本地安装 Python 包。
+
+        使用 ``shlex.quote`` 逐个转义包名,避免调用方传入包含 shell 元字符
+        的 "包名" 造成命令注入。
+        """
+
+        if not packages:
+            return "未指定要安装的包"
+        quoted = " ".join(shlex.quote(pkg) for pkg in packages)
+        pkg_display = " ".join(packages)
+        result = await self.aexec(f"pip install {quoted}", kernel="bash")
         if result.success:
-            return f"{pkg_str} installed successfully"
+            return f"{pkg_display} installed successfully"
         return f"安装失败: {result.errors}"
 
     async def alist_packages(self) -> t.List[str]:
