@@ -106,7 +106,9 @@ class MCPBridge:
 
         return tools
 
-    def _extract_tools_from_mcp_clients(self, tool_manager) -> List[Dict[str, Any]]:
+    def _extract_tools_from_mcp_clients(
+        self, tool_manager
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         从 mcp_client_dict 提取 MCP 工具
 
@@ -202,7 +204,11 @@ class MCPBridge:
 
         self._tools_cache = tools
         self._servers_cache = servers_info
-        self._cache_valid = True
+        # 修复 Bug X：仅在获取到实际数据时才标记缓存有效,避免首次调用时
+        # FunctionToolManager 还未就绪导致本进程永久返回空列表。
+        # 和 Round 4 Bug U（plugin_manager）/ Bug V（skill_loader）保持同一模式。
+        if tools or servers_info:
+            self._cache_valid = True
 
         logger.info(f"共发现 {len(tools)} 个 MCP 工具，来自 {len(servers_info)} 个服务器")
         return tools
