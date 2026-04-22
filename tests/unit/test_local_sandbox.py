@@ -403,3 +403,54 @@ async def test_local_sandbox_install_returns_prefixed_error_on_failure(
     result = await sandbox.ainstall("broken")
 
     assert result == "安装失败: pip boom"
+
+
+def test_local_sandbox_default_cwd_falls_back_when_workspace_unwritable(
+    monkeypatch: "MonkeyPatch",
+    tmp_path: Path,
+) -> None:
+    """回归 Bug M：非 root 无 /workspace 写权限时应回退到可写目录，而非构造即崩溃。"""
+
+    from astrbot_orchestrator_v5.sandbox import local_sandbox as local_sandbox_module
+
+    # 模拟 /workspace 不可写、~/.astrbot_local_sandbox 不可写，只有 tmp_path 能写入
+    real_makedirs = local_sandbox_module.os.makedirs
+    writable_dir = tmp_path / "fallback"
+
+    def fake_makedirs(path: str, exist_ok: bool = False) -> None:
+        """对 /workspace 和 ~/.astrbot_local_sandbox 拒绝写入，其他路径走真实实现。"""
+
+        normalized = local_sandbox_module.os.path.expanduser(path)
+        if normalized.startswith("/workspace") or normalized.endswith(".astrbot_local_sandbox"):
+            raise PermissionError(f"denied: {path}")
+        real_makedirs(path, exist_ok=exist_ok)
+
+    real_access = local_sandbox_module.os.access
+
+    def fake_access(path: str, mode: int) -> bool:
+        """只有 writable_dir 认为可写。"""
+
+        normalized = local_sandbox_module.os.path.expanduser(path)
+        if normalized.startswith("/workspace") or normalized.endswith(".astrbot_local_sandbox"):
+            return False
+        return real_access(path, mode)
+
+    monkeypatch.setenv("ASTRBOT_LOCAL_SANDBOX_CWD", str(writable_dir))
+    monkeypatch.setattr(local_sandbox_module.os, "makedirs", fake_makedirs)
+    monkeypatch.setattr(local_sandbox_module.os, "access", fake_access)
+
+    sandbox = LocalSandbox()  # 不传 cwd，走默认回退链
+
+    assert sandbox.cwd == str(writable_dir)
+    assert writable_dir.exists()
+
+
+def test_local_sandbox_accepts_none_cwd_without_touching_workspace(
+    monkeypatch: "MonkeyPatch",
+    tmp_path: Path,
+) -> None:
+    """回归 Bug M：构造函数允许 cwd=None，不会硬编码到 /workspace。"""
+
+    monkeypatch.setenv("ASTRBOT_LOCAL_SANDBOX_CWD", str(tmp_path))
+    sandbox = LocalSandbox(cwd=None)
+    assert sandbox.cwd == str(tmp_path)

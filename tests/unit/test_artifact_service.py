@@ -518,6 +518,26 @@ def test_artifact_service_path_under_any_root_handles_glob_fallback() -> None:
     assert ArtifactService._path_under_any_root("/elsewhere/file.py", roots) is False
 
 
+def test_artifact_service_relative_to_roots_preserves_glob_subpaths() -> None:
+    """回归 Bug I：Shipyard 实际 cwd 下的子目录不得被拍扁。
+
+    修复前，含 ``*`` 的 glob 根在 ``_relative_to_roots`` 中直接 ``continue``，
+    导致 ``/home/ship_abc/workspace/sub/main.py`` 返回成了 ``main.py``，
+    调用方写入本地时丟失了整个子目录结构。
+    """
+
+    roots = ("/home/ship_*/workspace",)
+
+    assert (
+        ArtifactService._relative_to_roots("/home/ship_abc/workspace/sub/main.py", roots)
+        == "sub/main.py"
+    )
+    # 根本身命中时也应能返回空字符串，而不是 basename
+    assert ArtifactService._relative_to_roots("/home/ship_abc/workspace", roots) == ""
+    # 不满足 glob 的路径回退到 basename
+    assert ArtifactService._relative_to_roots("/tmp/outside.py", roots) == "outside.py"
+
+
 def test_artifact_service_build_list_command_quotes_literal_roots_but_preserves_glob() -> None:
     """硬编码的路径应被转义，含通配符的路径必须保留以供 bash 展开。"""
 

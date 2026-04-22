@@ -24,7 +24,7 @@ from ..runtime.pipeline import (
     TextOutputParser,
 )
 from ..runtime.request_context import RequestContext
-from ..shared import UnsafePathError, ensure_within_base
+from ..shared import UnsafePathError, ensure_within_base, quote_shell_path, slugify_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -685,7 +685,13 @@ class DynamicOrchestrator:
 
         files = [s.file_path for s in plan if s.action == "create_file" and s.file_path]
 
-        project_abs_path = f"{self.projects_dir}/{project_path or 'my_project'}"
+        # project_path 来自 LLM/用户输入，可能包含空格、中文、反引号等 shell 元字符。
+        # 作为目录名先做 slugify，再用 shlex.quote 形成命令示例，以免用户直接
+        # 复粘时注入危险命令。
+        raw_project = project_path or "my_project"
+        safe_project = slugify_identifier(raw_project) or "my_project"
+        project_abs_path = f"{self.projects_dir}/{safe_project}"
+        quoted_project_abs = quote_shell_path(project_abs_path)
 
         summary = f"""## 📊 项目创建完成
 
@@ -702,9 +708,9 @@ class DynamicOrchestrator:
         summary += f"""
 **💾 下载说明:**
 文件已保存到 AstrBot 数据目录，可通过以下方式获取：
-1. 查看文件: `/exec cat {project_abs_path}/<文件名>`
-2. 打包下载: `/exec cd {project_abs_path} && tar czf /tmp/project.tar.gz .`
-3. 运行程序: `/exec python {project_abs_path}/main.py`
+1. 查看文件: `/exec cat {quoted_project_abs}/<文件名>`
+2. 打包下载: `/exec cd {quoted_project_abs} && tar czf /tmp/project.tar.gz .`
+3. 运行程序: `/exec python {quoted_project_abs}/main.py`
 4. 如果是 Web 应用，访问对应端口
 
 💡 遇到问题? 发送 `/debug analyze 错误描述` 让我帮你分析

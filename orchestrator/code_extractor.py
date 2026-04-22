@@ -127,13 +127,17 @@ class CodeExtractor:
         - ```language filename\ncode\n```  (空格分隔)
         - 文件名注释模式（代码块前一行有 // filename 或 # filename）
         """
-        blocks = []
+        blocks: List[CodeBlock] = []
+        # 跟随每个已保留 block 对应的原始 match，以保障后续按位置回查前一行
+        # 注释时不会因中间空内容 block 被跳过而错位。
+        block_matches: List[re.Match[str]] = []
 
         # 模式1: 捕获 header 整行，再解析语言/文件名，避免把首行代码误识别为文件名
         pattern = r"```[ \t]*([^\r\n`]*)\r?\n(.*?)```"
-        matches = re.findall(pattern, text, re.DOTALL)
+        match_iter = list(re.finditer(pattern, text, re.DOTALL))
 
-        for header, content in matches:
+        for m in match_iter:
+            header, content = m.group(1), m.group(2)
             lang, filename = self._parse_block_header(header)
             content = content.strip()
 
@@ -173,29 +177,49 @@ class CodeExtractor:
                 if not lang:
                     lang = "text"
 
-            # 如果没有指定文件名，使用默认文件名
-            if not filename:
-                filename = self.DEFAULT_FILENAMES.get(lang)
+            # 注意：不在此处填充 DEFAULT_FILENAMES，否则模式2（前一行注释文件名）将
+            # 无法覆盖伪默认值。真正的默认文件名回退转移到模式2之后统一处理。
 
             blocks.append(CodeBlock(language=lang, content=content, filename=filename))
+            block_matches.append(m)
 
         # 模式2: 检查代码块前的文件名注释
         # 例如: "<!-- index.html -->" 或 "// app.js" 或 "# main.py" 后跟代码块
+        # 依靠 finditer 给出的单个块真实起始位置回查，而不是按语言名再搜一遍
+        # ——后者会让多个同语言代码块的注释全部滑产到第一个代码块上。
+        unsafe_block_ids: set[int] = set()
         if blocks:
-            lines = text.split("\n")
-            for block in blocks:
+            fname_comment_pattern = re.compile(r"(?://|#|<!--|/\*)\s*([\w./\\-]+\.\w+)")
+            for block, match in zip(blocks, block_matches, strict=True):
                 if block.filename:
                     continue
-                # 在原文中找到这个代码块的位置
-                block_start_pattern = re.compile(r"```\s*" + re.escape(block.language))
-                for line_idx, line in enumerate(lines):
-                    if block_start_pattern.search(line) and line_idx > 0:
-                        prev_line = lines[line_idx - 1].strip()
-                        # 检查前一行是否包含文件名
-                        fname_match = re.search(r"(?://|#|<!--|/\*)\s*([\w./\\-]+\.\w+)", prev_line)
-                        if fname_match:
-                            block.filename = fname_match.group(1)
-                        break
+                # 找到此代码块所在行前一行的原文范围
+                line_start = text.rfind("\n", 0, match.start())
+                if line_start == -1:
+                    continue
+                prev_line_end = line_start
+                prev_line_start = text.rfind("\n", 0, prev_line_end)
+                prev_line = text[prev_line_start + 1 : prev_line_end].strip()
+                fname_match = fname_comment_pattern.search(prev_line)
+                if fname_match:
+                    try:
+                        block.filename = sanitize_relative_path(fname_match.group(1))
+                    except UnsafePathError:
+                        logger.warning("忽略不安全代码块注释文件名: %s", fname_match.group(1))
+                        # 注释中出现明确但不安全的文件名——视作用户意图指向危险路径，
+                        # 不回退到默认文件名，避免将内容写入错误位置。
+                        unsafe_block_ids.add(id(block))
+
+        # 模式3: 给仍未确定文件名的代码块填充默认文件名
+        # （跳过模式2已被判定为不安全注释的代码块）
+        for block in blocks:
+            if id(block) in unsafe_block_ids:
+                continue
+            if not block.filename:
+                block.filename = self.DEFAULT_FILENAMES.get(block.language)
+
+        # 丢弃那些被显式标记为不安全的代码块
+        blocks = [b for b in blocks if id(b) not in unsafe_block_ids]
 
         return blocks
 
@@ -328,10 +352,40 @@ class CodeExtractor:
 
 
 class ProjectExporter:
-    """项目导出器 - 将代码导出到宝塔目录"""
+    """项目导出器 - 将代码打包导出到宿主/宝塔等下载目录。"""
 
-    def __init__(self, base_export_path: str = "/www/wwwroot/downloads"):
-        self.base_export_path = base_export_path
+    # 默认下载导出根目录。原本硬编码为宝塔的 ``/www/wwwroot/downloads``，
+    # 对非宝塔部署不安全也不合理。现改为允许通过环境变量
+    # ``ASTRBOT_EXPORT_BASE`` 或构造参数覆写，默认退到与所在平台无关的
+    # 安全临时目录，调用方应在生产环境中显式传入所需路径。
+    _BAOTA_DEFAULT_PATH: str = "/www/wwwroot/downloads"
+
+    @staticmethod
+    def _default_export_path() -> str:
+        """返回默认导出路径。
+
+        优先级：``ASTRBOT_EXPORT_BASE`` > ``/www/wwwroot/downloads``（该目录存在时）
+        > ``<tempdir>/astrbot_exports``。
+        """
+
+        env_path = os.environ.get("ASTRBOT_EXPORT_BASE")
+        if env_path:
+            return env_path
+        if os.path.isdir(ProjectExporter._BAOTA_DEFAULT_PATH):
+            return ProjectExporter._BAOTA_DEFAULT_PATH
+        import tempfile
+
+        return os.path.join(tempfile.gettempdir(), "astrbot_exports")
+
+    def __init__(self, base_export_path: Optional[str] = None):
+        """初始化导出器。
+
+        Args:
+            base_export_path: 显式指定的导出根目录。``None`` 时会按 ``_default_export_path``
+                逻辑构造，遇到非宝塔部署时会退到系统临时目录。
+        """
+
+        self.base_export_path = base_export_path or self._default_export_path()
 
     async def export_from_sandbox(
         self,
@@ -450,9 +504,9 @@ class CodeWriter:
         created_files = []
 
         try:
-            # 创建项目目录
+            # 创建项目目录（转义路径以避免含空格 / shell 元字符的 cwd 注入命令）
             logger.info("创建项目目录: %s", project_path)
-            await self.executor.execute(f"mkdir -p {project_path}", event)
+            await self.executor.execute(f"mkdir -p {quote_shell_path(project_path)}", event)
 
             for filename, content in files.items():
                 file_path = f"{project_path}/{filename}"
@@ -460,7 +514,7 @@ class CodeWriter:
                 # 创建子目录（如果需要）
                 dir_path = os.path.dirname(file_path)
                 if dir_path != project_path:
-                    await self.executor.execute(f"mkdir -p {dir_path}", event)
+                    await self.executor.execute(f"mkdir -p {quote_shell_path(dir_path)}", event)
 
                 # 写入文件（使用 skip_auth=True 绕过权限检查，因为这是内部调用）
                 logger.info("写入文件: %s (内容长度: %d)", file_path, len(content))
@@ -493,7 +547,9 @@ class CodeWriter:
         project_path = f"{base_path}/{project_name}"
 
         try:
-            result = await self.executor.execute(f"find {project_path} -type f", event)
+            result = await self.executor.execute(
+                f"find {quote_shell_path(project_path)} -type f", event
+            )
 
             # 解析文件列表
             files = []

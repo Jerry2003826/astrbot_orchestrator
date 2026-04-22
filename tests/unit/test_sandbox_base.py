@@ -228,18 +228,24 @@ async def test_code_sandbox_restart_healthcheck_and_status_fallbacks() -> None:
     """状态查询应在包列表或变量读取失败时回退到空结果。"""
 
     sandbox = StubSandbox()
-    sandbox.exec_results[("%restart", "ipython")] = ExecResult(text="", kernel="ipython")
     sandbox.exec_results[("echo ok", "bash")] = ExecResult(text="ok", kernel="bash")
     sandbox.exec_errors[("pip list --format=columns | tail -n +3 | cut -d ' ' -f 1", "bash")] = (
         RuntimeError("pip error")
     )
     sandbox.exec_errors[("%who", "ipython")] = RuntimeError("who error")
 
+    # 默认 arestart 实现是 astop()+astart() 的幂等循环，不再依赖
+    # 不存在的 IPython 内核魔法 %restart。
+    assert sandbox._started is False
+    await sandbox.astart()
+    assert sandbox._started is True
     await sandbox.arestart()
+    assert sandbox._started is True
+    assert all(call[0] != "%restart" for call in sandbox.exec_calls)
+
     health = await sandbox.ahealthcheck()
     status = await sandbox.astatus()
 
-    assert sandbox.exec_calls[0][0] == "%restart"
     assert health == "healthy"
     assert status.healthy is True
     assert status.mode == "stub"

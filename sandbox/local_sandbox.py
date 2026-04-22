@@ -15,6 +15,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import tempfile
 import typing as t
 
 from ..shared import UnsafePathError, resolve_path_within_base
@@ -22,6 +23,38 @@ from .base import CodeSandbox
 from .types import ExecChunk, ExecResult, SandboxFile
 
 logger = logging.getLogger(__name__)
+
+# 默认 cwd：优先使用 ``/workspace``，若当前进程无权限则退到用户级别的
+# 用户数据目录，避免代码生成器在非 root 运行时直接崩溃。
+_DEFAULT_CWD_SENTINEL = "/workspace"
+
+
+def _resolve_default_cwd() -> str:
+    """选择一个当前进程可写的默认工作目录。"""
+
+    env_cwd = os.environ.get("ASTRBOT_LOCAL_SANDBOX_CWD")
+    candidates = []
+    if env_cwd:
+        candidates.append(env_cwd)
+    candidates.extend(
+        [
+            _DEFAULT_CWD_SENTINEL,
+            os.path.expanduser("~/.astrbot_local_sandbox"),
+            os.path.join(tempfile.gettempdir(), "astrbot_local_sandbox"),
+        ]
+    )
+    for path in candidates:
+        try:
+            os.makedirs(path, exist_ok=True)
+        except (PermissionError, OSError) as exc:
+            logger.debug("LocalSandbox 候选 cwd %s 不可用: %s", path, exc)
+            continue
+        # 再确认确实可写
+        if os.access(path, os.W_OK):
+            return path
+    # 运行到这里说明连 tempdir 都无法使用，回退到 tempdir 自身
+    return tempfile.gettempdir()
+
 
 # 匹配 matplotlib 等生成的图片标签
 IMAGE_PATTERN = re.compile(r"<image>(.*?)</image>", re.DOTALL)
@@ -39,11 +72,25 @@ class LocalSandbox(CodeSandbox):
     def __init__(
         self,
         session_id: t.Optional[str] = None,
-        cwd: str = "/workspace",
+        cwd: t.Optional[str] = None,
         timeout: float = 30.0,
     ) -> None:
-        super().__init__(session_id=session_id, cwd=cwd, timeout=timeout)
-        os.makedirs(self.cwd, exist_ok=True)
+        """初始化本地沙盒。
+
+        Args:
+            cwd: 工作目录。``None`` 时自动选择可写目录，默认
+                先试 ``/workspace``，失败时依次退到 ``~/.astrbot_local_sandbox``
+                和 系统临时目录，避免在非 root 下因不可写而出错。
+                可通过环境变量 ``ASTRBOT_LOCAL_SANDBOX_CWD`` 覆写。
+        """
+
+        resolved_cwd = cwd if cwd else _resolve_default_cwd()
+        super().__init__(session_id=session_id, cwd=resolved_cwd, timeout=timeout)
+        # 即便用户显式传入，也尽量创建但容忍权限异常，避免构造时立即崩溃。
+        try:
+            os.makedirs(self.cwd, exist_ok=True)
+        except (PermissionError, OSError) as exc:
+            logger.warning("LocalSandbox 创建 cwd=%s 失败: %s", self.cwd, exc)
 
     @property
     def mode(self) -> str:
@@ -51,7 +98,10 @@ class LocalSandbox(CodeSandbox):
 
     async def astart(self) -> None:
         """启动本地沙盒"""
-        os.makedirs(self.cwd, exist_ok=True)
+        try:
+            os.makedirs(self.cwd, exist_ok=True)
+        except (PermissionError, OSError) as exc:
+            logger.warning("[LocalSandbox] 创建 cwd=%s 失败: %s", self.cwd, exc)
         self._started = True
         logger.info("[LocalSandbox] 已启动, cwd=%s", self.cwd)
 

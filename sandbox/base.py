@@ -267,8 +267,17 @@ class CodeSandbox(ABC):
         return variables
 
     async def arestart(self) -> None:
-        """重启执行内核"""
-        await self.aexec("%restart", kernel="ipython")
+        """重启执行内核。
+
+        默认实现采用 ``astop`` + ``astart`` 的幂等循环。旧实现依赖 IPython
+        的 ``%restart`` 魔法，但 ``LocalSandbox`` 等实现使用 ``python3 -c``
+        执行代码，并不存在 IPython 内核，直接执行 ``%restart`` 会引发
+        ``SyntaxError``。这里用更通用且安全的停止/启动循环作为默认行为，
+        由需要真正 IPython 重启语义的实现自行覆写。
+        """
+
+        await self.astop()
+        await self.astart()
 
     # ── 健康检查 ──────────────────────────────────────────
 

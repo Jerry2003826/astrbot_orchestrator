@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import logging
 import os
 import posixpath
+import re
 from typing import Any, Mapping, cast
 
 from ..orchestrator.code_extractor import CodeExtractor, CodeWriter
@@ -278,16 +279,34 @@ class ArtifactService:
         )
 
     @staticmethod
+    def _glob_root_to_regex(root: str) -> re.Pattern[str]:
+        """把包含 ``*`` / ``?`` 的根目录转换为用于匹配绝对路径的正则。
+
+        仅将 ``*`` / ``?`` 作为 shell 通配符处理，其他字符按字面量转义，
+        避免把用户路径中的 ``.`` 等字符当成正则元字符。
+        """
+
+        parts: list[str] = []
+        for ch in root.rstrip("/"):
+            if ch == "*":
+                parts.append(r"[^/]*")
+            elif ch == "?":
+                parts.append(r"[^/]")
+            else:
+                parts.append(re.escape(ch))
+        # 匹配根本身或以根为前缀的路径段
+        return re.compile("^" + "".join(parts) + r"(?:/|$)")
+
+    @staticmethod
     def _path_under_any_root(path: str, scan_roots: tuple[str, ...]) -> bool:
         """判断路径是否属于任一候选根。"""
 
         for root in scan_roots:
             if not root:
                 continue
-            # /home/ship_*/workspace 类 glob 根在本进程无法展开，回退到包含判断。
-            if "*" in root:
-                needle = root.split("*", 1)[0]
-                if needle and needle in path:
+            # /home/ship_*/workspace 类 glob 根在本进程无法展开，使用正则匹配路径段。
+            if "*" in root or "?" in root:
+                if ArtifactService._glob_root_to_regex(root).match(path):
                     return True
                 continue
             prefix = root.rstrip("/") + "/"
@@ -297,16 +316,38 @@ class ArtifactService:
 
     @staticmethod
     def _relative_to_roots(path: str, scan_roots: tuple[str, ...]) -> str:
-        """将绝对路径换算为相对于包含它的最长根目录的路径。"""
+        """将绝对路径换算为相对于包含它的最长根目录的路径。
 
-        best_match = ""
+        同时支持字面量根（例如 ``/workspace/sessions/<hash>``）和含 ``*`` /
+        ``?`` 的 glob 根（例如 ``/home/ship_*/workspace``）。glob 根按实际
+        匹配到的前缀长度参与“最长前缀”比较，确保 Shipyard 真实路径下的
+        子目录结构（``sub/main.py``）不会被拍扁成 basename。
+        """
+
+        best_prefix_len = 0
         for root in scan_roots:
-            if not root or "*" in root:
+            if not root:
+                continue
+            if "*" in root or "?" in root:
+                match = ArtifactService._glob_root_to_regex(root).match(path)
+                if match:
+                    # match.end() 指向分隔 `/` 或字符串末尾，均为正确切点
+                    prefix_len = match.end()
+                    # 若匹配到的是分隔符，去掉 `/` 再参与比较
+                    if prefix_len < len(path) and path[prefix_len - 1] != "/":
+                        # _glob_root_to_regex 使用 `(?:/|$)`，end 恰好包含 /；
+                        # 无需额外调整
+                        pass
+                    if prefix_len > best_prefix_len:
+                        best_prefix_len = prefix_len
                 continue
             prefix = root.rstrip("/") + "/"
-            if path == root or path.startswith(prefix):
-                if len(prefix) > len(best_match):
-                    best_match = prefix
-        if best_match:
-            return path[len(best_match) :]
+            if path == root:
+                if len(root) > best_prefix_len:
+                    best_prefix_len = len(root)
+            elif path.startswith(prefix):
+                if len(prefix) > best_prefix_len:
+                    best_prefix_len = len(prefix)
+        if best_prefix_len:
+            return path[best_prefix_len:].lstrip("/")
         return posixpath.basename(path)

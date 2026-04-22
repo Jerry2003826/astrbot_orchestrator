@@ -286,7 +286,7 @@ async def test_project_exporter_runs_listing_and_tar_commands() -> None:
     """项目导出器应先列目录再打包文件。"""
 
     executor = FakeExecutor()
-    exporter = ProjectExporter()
+    exporter = ProjectExporter(base_export_path="/www/wwwroot/downloads")
 
     success, message = await exporter.export_from_sandbox(
         executor=executor,
@@ -312,7 +312,7 @@ async def test_project_exporter_returns_failure_on_exception() -> None:
     executor.execute_errors["cd /workspace/demo && tar -czf /tmp/project.tar.gz ."] = RuntimeError(
         "tar failed"
     )
-    exporter = ProjectExporter()
+    exporter = ProjectExporter(base_export_path="/tmp/astrbot_exports")
 
     success, message = await exporter.export_from_sandbox(
         executor=executor,
@@ -445,3 +445,103 @@ async def test_code_writer_get_project_files_returns_empty_on_failure() -> None:
     files = await writer.get_project_files(event=object(), project_name="demo")
 
     assert files == []
+
+
+def test_extract_code_blocks_comment_filename_binds_per_block() -> None:
+    """回归 Bug H：多个同语言代码块的文件名注释应分别绑定到各自的块。
+
+    修复前模式一预填了默认文件名，模式二又仅按语言名正则追回第一个结果，
+    导致多个 python 代码块被全部命名为 main.py，代码相互覆盖。
+    """
+
+    text = (
+        "# first.py\n"
+        "```python\n"
+        "print('first')\n"
+        "```\n"
+        "# second.py\n"
+        "```python\n"
+        "print('second')\n"
+        "```\n"
+        "# third.py\n"
+        "```python\n"
+        "print('third')\n"
+        "```\n"
+    )
+
+    extractor = CodeExtractor()
+    blocks = extractor.extract_code_blocks(text)
+
+    assert [b.filename for b in blocks] == ["first.py", "second.py", "third.py"]
+    assert [b.content for b in blocks] == [
+        "print('first')",
+        "print('second')",
+        "print('third')",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_code_writer_quotes_paths_with_shell_meta() -> None:
+    """回归 Bug J：包含空格的基路径应被 shlex.quote，避免 shell 注入。"""
+
+    executor = FakeExecutor()
+    writer = CodeWriter(executor, base_path="/workspace/my project")
+
+    success, created = await writer.write_files(
+        files={"main.py": "print('ok')"},
+        event=object(),
+        project_name="demo",
+    )
+
+    assert success is True
+    assert created == ["/workspace/my project/demo/main.py"]
+    # 命令中的路径必须被包裹，不再是裸的含空格字符串
+    assert executor.execute_calls == ["mkdir -p '/workspace/my project/demo'"]
+
+
+@pytest.mark.asyncio
+async def test_code_writer_get_project_files_quotes_find_target() -> None:
+    """回归 Bug J：``find`` 命令的路径参数同样需要 quote。"""
+
+    executor = FakeExecutor()
+    expected_cmd = "find '/workspace/my project/demo' -type f"
+    executor.execute_results[expected_cmd] = "/workspace/my project/demo/main.py\n"
+    writer = CodeWriter(executor, base_path="/workspace/my project")
+
+    files = await writer.get_project_files(event=object(), project_name="demo")
+
+    assert expected_cmd in executor.execute_calls
+    assert files == ["/workspace/my project/demo/main.py"]
+
+
+def test_project_exporter_default_path_prefers_env(monkeypatch: "MonkeyPatch") -> None:
+    """回归 Bug L：``ASTRBOT_EXPORT_BASE`` 应用于默认导出路径。"""
+
+    monkeypatch.setenv("ASTRBOT_EXPORT_BASE", "/tmp/custom_exports")
+    exporter = ProjectExporter()
+    assert exporter.base_export_path == "/tmp/custom_exports"
+
+
+def test_project_exporter_default_path_without_baota_uses_tempdir(
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """回归 Bug L：无宝塔目录、无环境变量时退到临时目录而不是宝塔硬编码路径。"""
+
+    import tempfile
+
+    monkeypatch.delenv("ASTRBOT_EXPORT_BASE", raising=False)
+    monkeypatch.setattr(
+        "astrbot_orchestrator_v5.orchestrator.code_extractor.os.path.isdir",
+        lambda p: False,
+    )
+    exporter = ProjectExporter()
+    assert exporter.base_export_path == tempfile.gettempdir() + "/astrbot_exports"
+
+
+def test_extract_code_blocks_default_fallback_only_when_no_comment() -> None:
+    """回归 Bug H：缺少文件名注释时还是应该回退到默认文件名。"""
+
+    extractor = CodeExtractor()
+    blocks = extractor.extract_code_blocks("```python\nprint(1)\n```")
+    assert len(blocks) == 1
+    assert blocks[0].filename == "main.py"
