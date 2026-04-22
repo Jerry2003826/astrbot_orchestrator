@@ -253,7 +253,10 @@ def test_runtime_container_build_core_tools_wires_effectful_components(
     assert container.mcp_tool is not None
     assert container.debugger is not None
     assert container.executor is not None
-    assert container.artifact_service.args == ("/AstrBot/data/agent_projects",)
+    # agent_projects 路径优先级见 RuntimeContainer._get_plugin_projects_dir:
+    # ENV > context.get_plugin_data_dir > <cwd>/data/agent_projects > /AstrBot/data/agent_projects
+    assert len(container.artifact_service.args) == 1
+    assert container.artifact_service.args[0].endswith("agent_projects")
     assert container.skill_loader.args == ("ctx",)
     assert container.mcp_bridge.args == ("ctx",)
     assert container.plugin_tool.args == ("ctx",)

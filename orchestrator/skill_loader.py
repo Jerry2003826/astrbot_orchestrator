@@ -128,12 +128,21 @@ class AstrBotSkillLoader:
             except Exception:
                 pass
 
-        # 尝试常见路径
-        possible_paths = [
-            Path("/AstrBot/data/skills"),
-            Path("data/skills"),
-            Path("skills"),
-        ]
+        # 尝试常见路径 (按优先级检查)
+        import os
+
+        possible_paths: list[Path] = []
+        env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
+        if env_root:
+            possible_paths.append(Path(env_root) / "skills")
+        possible_paths.extend(
+            [
+                Path.cwd() / "data" / "skills",
+                Path("data/skills"),
+                Path("skills"),
+                Path("/AstrBot/data/skills"),  # 官方 Docker 镜像回退
+            ]
+        )
 
         for p in possible_paths:
             if p.exists():
