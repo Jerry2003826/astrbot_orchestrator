@@ -159,6 +159,18 @@ class LocalSandbox(CodeSandbox):
             )
 
         except asyncio.TimeoutError:
+            # 修复 Bug W：超时后必须主动杀掉子进程并回收,避免遗留僵尸进程。
+            # Round 3 Bug O 已修复 astream_exec 同样问题,此处补齐 aexec 路径。
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            except Exception as kill_exc:  # noqa: BLE001
+                logger.debug("[LocalSandbox] proc.kill 失败: %s", kill_exc)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=1.0)
+            except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                logger.debug("[LocalSandbox] 子进程 wait 超时,已继续")
             return ExecResult(
                 text="",
                 errors=f"执行超时（{timeout}秒）",
