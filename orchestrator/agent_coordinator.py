@@ -59,19 +59,45 @@ class AgentCoordinator:
         self._all_task_outputs: List[str] = []  # 记录所有任务的原始输出（用于兜底提取）
 
     def _get_plugin_projects_dir(self) -> str:
-        """获取插件的项目存储目录。"""
+        """获取插件的项目存储目录。
+
+        优先级:
+            1. ``ASTRBOT_DATA_DIR`` / ``ASTRBOT_ROOT`` 环境变量
+            2. ``<cwd>/data/agent_projects`` (`astrbot init` 标准布局)
+            3. ``/AstrBot/data/agent_projects`` (官方 Docker 镜像)
+            4. 插件包目录下的 ``projects/`` (仅作为最后回退)
+            5. 临时目录 (绝不抛出崩溃)
+
+        先前直接将目录固定到 **插件代码目录** 下的 ``projects/``——
+        pip 安装 时这个目录 大概率是只读的 (site-packages),而且即便可写
+        升级插件时也会连带用户项目数据一起删掉,严重错误。
+        """
+
         import os
         from pathlib import Path
+        import tempfile
 
-        # 从当前文件位置推断插件目录
-        current_file = Path(__file__).resolve()
-        plugin_root = current_file.parent.parent  # astrbot_orchestrator_v5 目录
-        projects_dir = plugin_root / "projects"
+        candidates: list[Path] = []
 
-        # 确保目录存在
-        os.makedirs(projects_dir, exist_ok=True)
+        env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
+        if env_root:
+            candidates.append(Path(env_root) / "agent_projects")
 
-        return str(projects_dir)
+        candidates.append(Path.cwd() / "data" / "agent_projects")
+        candidates.append(Path("/AstrBot/data/agent_projects"))
+
+        # 最后才考虑插件包目录 (保留原行为,但降为最低优先级)
+        candidates.append(Path(__file__).resolve().parent.parent / "projects")
+
+        for path in candidates:
+            try:
+                os.makedirs(path, exist_ok=True)
+                return str(path)
+            except OSError:
+                continue
+
+        fallback = tempfile.mkdtemp(prefix="astrbot_orchestrator_projects_")
+        return fallback
 
     async def execute(
         self,

@@ -23,6 +23,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import logging
+import shlex
 import typing as t
 
 from ..shared import resolve_path_within_base
@@ -218,8 +219,10 @@ class CodeSandbox(ABC):
     # ── 包管理 ────────────────────────────────────────────
 
     async def ainstall(self, *packages: str) -> str:
-        """
-        在沙盒中安装 Python 包
+        """在沙盒中安装 Python 包。
+
+        使用 ``shlex.quote`` 逐个转义包名,避免包名中的 shell 元字符
+        造成命令注入。
 
         Args:
             packages: 要安装的包名列表
@@ -227,12 +230,16 @@ class CodeSandbox(ABC):
         Returns:
             安装结果文本
         """
-        pkg_str = " ".join(packages)
+
+        if not packages:
+            return "未指定要安装的包"
+        quoted = " ".join(shlex.quote(pkg) for pkg in packages)
+        pkg_display = " ".join(packages)
         result = await self.aexec(
-            f"pip install {pkg_str}",
+            f"pip install {quoted}",
             kernel="bash",
         )
-        return f"{pkg_str} installed successfully" if result.success else result.errors
+        return f"{pkg_display} installed successfully" if result.success else result.errors
 
     async def alist_packages(self) -> t.List[str]:
         """

@@ -183,17 +183,27 @@ async def test_local_sandbox_exec_returns_error_on_subprocess_failure(
 
 @pytest.mark.asyncio
 async def test_local_sandbox_stream_exec_emits_stdout_stderr_and_status(tmp_path: Path) -> None:
-    """流式执行应依次产出 stdout、stderr 与状态块。"""
+    """流式执行应产出 stdout、stderr 与状态块。
+
+    注: 在修复 Bug P (死锁) 后, stdout 与 stderr 改为 **并发** 读取,
+    两个流的到达顺序取决于操作系统调度,测试不再依赖严格顺序。
+    """
 
     sandbox = LocalSandbox(cwd=str(tmp_path))
     code = "import sys\nprint('out-line')\nprint('err-line', file=sys.stderr)\n"
 
     chunks = await collect_chunks(sandbox.astream_exec(code))
 
-    assert [chunk.type for chunk in chunks] == ["stdout", "stderr", "status"]
-    assert chunks[0].content == "out-line\n"
-    assert chunks[1].content == "err-line\n"
-    assert chunks[2].content == "exit_code=0"
+    types_seen = [chunk.type for chunk in chunks]
+    # 必须包含 stdout / stderr / status 三种块
+    assert "stdout" in types_seen
+    assert "stderr" in types_seen
+    assert types_seen[-1] == "status"  # status 必为最后一块
+    stdout_text = "".join(c.content for c in chunks if c.type == "stdout")
+    stderr_text = "".join(c.content for c in chunks if c.type == "stderr")
+    assert "out-line" in stdout_text
+    assert "err-line" in stderr_text
+    assert chunks[-1].content == "exit_code=0"
 
 
 @pytest.mark.asyncio
@@ -239,16 +249,19 @@ async def test_local_sandbox_stream_exec_returns_timeout_chunk(
     monkeypatch: "MonkeyPatch",
     tmp_path: Path,
 ) -> None:
-    """流式执行超时时应返回 stderr 块。"""
+    """子进程创建失败时应产出 stderr 块 (包含异常消息)。
+
+    注: 修复 Bug O 后, 真正的 "超时" 由 asyncio.wait_for 在队列 get 处触发,
+    不再从 ``create_subprocess_exec`` 捕获 TimeoutError。此测试改为验证
+    子进程 **创建失败** (比如进程数额满) 的错误分支。
+    """
 
     sandbox = LocalSandbox(cwd=str(tmp_path))
 
     async def fake_create_subprocess_exec(*args: Any, **kwargs: Any) -> DummyProcess:
-        """模拟创建进程时直接超时。"""
-
         del args
         del kwargs
-        raise asyncio.TimeoutError()
+        raise RuntimeError("fork bomb protection")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
@@ -256,7 +269,32 @@ async def test_local_sandbox_stream_exec_returns_timeout_chunk(
 
     assert len(chunks) == 1
     assert chunks[0].type == "stderr"
-    assert chunks[0].content == "执行超时（1.5秒）"
+    assert "fork bomb protection" in chunks[0].content
+
+
+@pytest.mark.asyncio
+async def test_local_sandbox_stream_exec_real_timeout_kills_long_running(
+    tmp_path: Path,
+) -> None:
+    """真实超时路径 (Bug O 回归): 子进程运行超时应被杀掉并产出超时 stderr。"""
+
+    sandbox = LocalSandbox(cwd=str(tmp_path), timeout=0.3)
+
+    chunks = []
+    async for chunk in sandbox.astream_exec(
+        "while true; do echo .; sleep 0.01; done",
+        kernel="bash",
+        timeout=0.3,
+    ):
+        chunks.append(chunk)
+        if len(chunks) > 2000:
+            pytest.fail("超时未生效")
+
+    stderr_texts = [c.content for c in chunks if c.type == "stderr"]
+    assert any("执行超时" in t for t in stderr_texts), (
+        f"期望收到超时 stderr, 实际: {stderr_texts[:5]}"
+    )
+    assert chunks[-1].type == "status"
 
 
 @pytest.mark.asyncio

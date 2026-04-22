@@ -21,7 +21,12 @@ logger = astrbot_logger
 
 
 def _resolve_astrbot_data_root() -> Path:
-    """解析 AstrBot `data/` 根目录,兼容官方 Docker 和本地 `astrbot init` 两种布局。"""
+    """解析 AstrBot `data/` 根目录,兼容官方 Docker 和本地 `astrbot init` 两种布局。
+
+    注: 这个函数被设计为每次调用时都重新解析一次。早期版本在 import 时
+    就冻结为模块级常量,导致用户在 runtime 之后才 `os.chdir()` 或设置
+    `ASTRBOT_DATA_DIR` 时不生效。
+    """
 
     env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
     if env_root:
@@ -34,9 +39,20 @@ def _resolve_astrbot_data_root() -> Path:
     return Path("/AstrBot/data")  # 官方 Docker 镜像回退
 
 
-_DATA_ROOT = _resolve_astrbot_data_root()
-CONFIG_PATH = str(_DATA_ROOT / "cmd_config.json")
-PLUGIN_CONFIG_PATH = str(_DATA_ROOT / "config" / "astrbot_orchestrator_config.json")
+def _config_path() -> str:
+    """运行时解析 `cmd_config.json` 路径,而不是用 import 时冻结的常量。"""
+    return str(_resolve_astrbot_data_root() / "cmd_config.json")
+
+
+def _plugin_config_path() -> str:
+    """运行时解析插件配置 JSON 路径。"""
+    return str(_resolve_astrbot_data_root() / "config" / "astrbot_orchestrator_config.json")
+
+
+# 保留模块级常量作为向后兼容 (测试/老代码调用) —— 但实际的 open() 均通过
+# 调用上面的 getter 函数获取最新路径。
+CONFIG_PATH = _config_path()
+PLUGIN_CONFIG_PATH = _plugin_config_path()
 
 
 def _utcnow() -> datetime:
@@ -71,7 +87,7 @@ class DynamicAgentManager:
 
         # 从插件配置文件获取
         try:
-            with open(PLUGIN_CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+            with open(_plugin_config_path(), "r", encoding="utf-8-sig") as f:
                 orch_config = cast(dict[str, Any], json.load(f))
             provider = orch_config.get("llm_provider")
             if provider:
@@ -127,7 +143,7 @@ class DynamicAgentManager:
                 )
             else:
                 # 备选：从文件读取
-                with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+                with open(_config_path(), "r", encoding="utf-8-sig") as f:
                     cfg = cast(dict[str, Any], json.load(f))
                 subagent_cfg = cast(dict[str, Any], cfg.get("subagent_orchestrator", {}))
 
@@ -266,7 +282,8 @@ class DynamicAgentManager:
 
     async def _save_to_file_config(self) -> None:
         """直接写入配置文件（备选方案）"""
-        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+        config_path = _config_path()
+        with open(config_path, "r", encoding="utf-8-sig") as f:
             config = cast(dict[str, Any], json.load(f))
 
         if "subagent_orchestrator" not in config:
@@ -288,7 +305,7 @@ class DynamicAgentManager:
 
         subagent_config["agents"] = existing_agents
 
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
 
         logger.info("动态 SubAgents 已保存到配置文件 (共 %d 个)", len(self._dynamic_agents))
@@ -325,7 +342,8 @@ class DynamicAgentManager:
                         return
 
             # 备选：直接操作文件
-            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+            config_path = _config_path()
+            with open(config_path, "r", encoding="utf-8-sig") as f:
                 config = cast(dict[str, Any], json.load(f))
 
             if "subagent_orchestrator" not in config:
@@ -339,7 +357,7 @@ class DynamicAgentManager:
                 a for a in subagent_config["agents"] if a.get("name") not in pending_names
             ]
 
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
 
             logger.info("已从配置文件中移除 SubAgents: %s", pending_names)
@@ -365,7 +383,7 @@ class DynamicAgentManager:
         else:
             # 备选：从文件读取
             try:
-                with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+                with open(_config_path(), "r", encoding="utf-8-sig") as f:
                     config = cast(dict[str, Any], json.load(f))
                 subagent_config = cast(dict[str, Any], config.get("subagent_orchestrator", {}))
             except Exception as e:
