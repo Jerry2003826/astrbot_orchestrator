@@ -13,12 +13,14 @@ import time
 import traceback
 from typing import Any, TypeVar, cast
 
+from astrbot.core.log import LogManager
+
 from ..runtime.container import RuntimeContainer
 from ..runtime.request_context import RequestContext
 from ..sandbox.types import ExecResult
 
 logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger("astrbot.security_audit")
+audit_logger = LogManager.GetLogger("astrbot_orchestrator.security_audit")
 
 BuildRequestContext = Callable[[Any, str, str, str], RequestContext]
 TComponent = TypeVar("TComponent")

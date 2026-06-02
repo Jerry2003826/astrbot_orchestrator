@@ -5,6 +5,18 @@
     "hint": "选择一个已配置的模型提供商，用于 Agent 的意图识别、代码生成等任务",
     "_special": "select_provider"
   },
+  "enable_natural_language_control": {
+    "description": "启用自然语言 LLM 路由入口",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后普通消息会先由模型判断是否需要交给编排器；不是关键词/正则路由"
+  },
+  "natural_language_router_scope": {
+    "description": "自然语言路由范围",
+    "type": "string",
+    "default": "direct",
+    "hint": "direct=仅私聊或 @/唤醒机器人后交给模型判断；all=所有普通消息都交给模型判断"
+  },
   "max_iterations": {
     "description": "Agent 自主执行的最大步骤数",
     "type": "int",

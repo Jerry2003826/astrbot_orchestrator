@@ -10,6 +10,7 @@ AstrBot 全自主智能体编排器
 """
 
 from collections.abc import AsyncIterator
+import json
 import logging
 from typing import Any
 
@@ -141,6 +142,169 @@ class OrchestratorPlugin(Star):
             self.config.get("enable_dynamic_agents"),
             self.config.get("force_subagents_for_complex_tasks"),
         )
+
+
+    def _config_bool(self, key: str, default: bool) -> bool:
+        """读取布尔配置，兼容 AstrBotConfig 缺省值。"""
+
+        value = self.config.get(key)
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on", "是", "开启"}
+        return bool(value)
+
+    def _config_str(self, key: str, default: str) -> str:
+        """读取字符串配置，兼容 AstrBotConfig 缺省值。"""
+
+        value = self.config.get(key)
+        if value is None or value == "":
+            return default
+        return str(value).strip()
+
+    def _should_skip_natural_language_router(self, event: AstrMessageEvent) -> bool:
+        """判断是否跳过自然语言路由的前置安全边界。"""
+
+        if not self._config_bool("enable_natural_language_control", True):
+            return True
+
+        text = (event.message_str or "").strip()
+        if not text or text.startswith("/"):
+            return True
+
+        scope = self._config_str("natural_language_router_scope", "direct").lower()
+        if scope in {"all", "all_messages", "all-messages", "所有", "全量"}:
+            return False
+
+        return not (
+            event.is_private_chat()
+            or bool(getattr(event, "is_at_or_wake_command", False))
+            or bool(getattr(event, "is_wake", False))
+        )
+
+    async def _get_router_provider_id(
+        self,
+        handlers: CommandHandlers,
+        event: AstrMessageEvent,
+    ) -> str:
+        """解析自然语言路由使用的模型提供商。"""
+
+        configured_provider = self._config_str("llm_provider", "")
+        if configured_provider:
+            return configured_provider
+        return await handlers._get_provider_id(event)
+
+    async def _route_natural_language_agent_request(
+        self,
+        event: AstrMessageEvent,
+        provider_id: str,
+    ) -> str | None:
+        """让 LLM 判断普通消息是否应该交给自主编排器。"""
+
+        if self._should_skip_natural_language_router(event):
+            return None
+
+        message = (event.message_str or "").strip()
+        is_direct = (
+            event.is_private_chat()
+            or bool(getattr(event, "is_at_or_wake_command", False))
+            or bool(getattr(event, "is_wake", False))
+        )
+        prompt = f"""你是 AstrBot 的消息路由器，需要判断一条普通聊天消息是否应该交给“自主智能体编排器”。
+
+自主智能体编排器适合处理：
+- 用户要求安装、搜索、配置、卸载、更新插件
+- 用户要求配置 MCP、创建/编辑 Skill、运行代码或命令、调试日志/报错
+- 用户要求创建文件、写网页/程序/脚本、搭建项目、生成可落地的技术产物
+- 用户要求多步骤排查、操作服务器、检查系统状态、修复问题
+
+不要交给编排器的情况：
+- 普通闲聊、情绪陪伴、角色扮演、日常问答
+- 只需要模型直接回答的知识性问题
+- 模糊、不像是在请求执行任务的句子
+- 群聊中没有明显对机器人发出的任务请求
+
+上下文：
+- 私聊或已 @/唤醒机器人: {is_direct}
+- 用户身份: {getattr(event, "role", "")}
+- 消息文本: {message}
+
+只输出一个 JSON 对象，不要解释，不要 markdown。字段要求：
+- route_to_agent: boolean，只有需要交给编排器时为 true
+- rewritten_request: string，route_to_agent=true 时把用户真实任务改写成简洁明确的中文；否则为空字符串
+- reason: string，一句话说明路由原因
+"""
+
+        try:
+            response = await self.context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=prompt,
+                system_prompt="你是严格的 JSON 路由分类器，只输出 JSON。",
+            )
+            decision = self._parse_router_decision(response.completion_text)
+        except Exception as exc:
+            logger.warning("自然语言 LLM 路由失败，放行给默认聊天流程: %s", exc, exc_info=True)
+            return None
+
+        if not decision.get("route_to_agent"):
+            logger.debug("自然语言 LLM 路由未命中: %s", decision.get("reason"))
+            return None
+
+        rewritten = str(decision.get("rewritten_request") or "").strip()
+        if not rewritten:
+            rewritten = message
+        logger.info("自然语言 LLM 路由命中: %s", str(decision.get("reason") or "")[:120])
+        return rewritten
+
+    @staticmethod
+    def _parse_router_decision(text: str) -> dict[str, Any]:
+        """解析路由模型返回的 JSON。"""
+
+        raw = (text or "").strip()
+        if raw.startswith("```json"):
+            raw = raw.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif raw.startswith("```"):
+            raw = raw.split("```", 1)[1].split("```", 1)[0].strip()
+        if "{" in raw and "}" in raw:
+            raw = raw[raw.find("{") : raw.rfind("}") + 1]
+        data = json.loads(raw)
+        route_value = data.get("route_to_agent", False)
+        if isinstance(route_value, str):
+            route_value = route_value.strip().lower() in {"1", "true", "yes", "y", "是", "需要", "route"}
+        return {
+            "route_to_agent": bool(route_value),
+            "rewritten_request": str(data.get("rewritten_request") or ""),
+            "reason": str(data.get("reason") or ""),
+        }
+
+    @filter.regex(r"(?s).+")
+    async def handle_natural_language_agent(
+        self,
+        event: AstrMessageEvent,
+    ) -> AsyncIterator[Any]:
+        """
+        自然语言控制入口。
+
+        捕获普通消息后交给 LLM 路由器判断；只有模型判定为技术执行任务时才复用 `/agent`。
+        """
+
+        await self.initialize()
+        handlers = self._get_command_handlers()
+        provider_id = await self._get_router_provider_id(handlers, event)
+        user_request = await self._route_natural_language_agent_request(event, provider_id)
+        if user_request is None:
+            return
+
+        original_message = event.message_str
+        event.message_str = user_request
+        event.should_call_llm(False)
+        try:
+            async for result in handlers.handle_agent(event):
+                yield result
+        finally:
+            event.message_str = original_message
 
     @filter.command("agent")
     async def handle_agent(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
