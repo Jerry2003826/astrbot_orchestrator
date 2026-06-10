@@ -4,9 +4,46 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    from ..artifacts.service import ArtifactService
+    from ..autonomous.debugger import SelfDebugger
+    from ..autonomous.executor import ExecutionManager
+    from ..autonomous.mcp_configurator import MCPConfiguratorTool
+    from ..autonomous.plugin_manager import PluginManagerTool
+    from ..autonomous.skill_creator import SkillCreatorTool
+    from ..orchestrator.agent_coordinator import AgentCoordinator
+    from ..orchestrator.capability_builder import AgentCapabilityBuilder
+    from ..orchestrator.core import DynamicOrchestrator
+    from ..orchestrator.dynamic_agent_manager import DynamicAgentManager
+    from ..orchestrator.mcp_bridge import MCPBridge
+    from ..orchestrator.meta_orchestrator import MetaOrchestrator
+    from ..orchestrator.skill_loader import AstrBotSkillLoader
+    from ..orchestrator.task_analyzer import TaskAnalyzer
+    from ..workflow.engine import WorkflowEngine
 
 logger = logging.getLogger(__name__)
+
+
+class _ExportAttributes(TypedDict, total=False):
+    """``export_attributes()`` 返回的组件映射结构。"""
+
+    artifact_service: ArtifactService
+    skill_loader: AstrBotSkillLoader
+    mcp_bridge: MCPBridge
+    workflow_engine: WorkflowEngine
+    dynamic_agent_manager: DynamicAgentManager
+    task_analyzer: TaskAnalyzer
+    capability_builder: AgentCapabilityBuilder
+    agent_coordinator: AgentCoordinator
+    meta_orchestrator: MetaOrchestrator
+    orchestrator: DynamicOrchestrator
+    plugin_tool: PluginManagerTool
+    skill_tool: SkillCreatorTool
+    mcp_tool: MCPConfiguratorTool
+    debugger: SelfDebugger
+    executor: ExecutionManager
 
 
 @dataclass(slots=True)
@@ -15,21 +52,21 @@ class RuntimeContainer:
 
     context: Any
     config: Any
-    artifact_service: Any | None = None
-    skill_loader: Any | None = None
-    mcp_bridge: Any | None = None
-    workflow_engine: Any | None = None
-    dynamic_agent_manager: Any | None = None
-    task_analyzer: Any | None = None
-    capability_builder: Any | None = None
-    agent_coordinator: Any | None = None
-    meta_orchestrator: Any | None = None
-    orchestrator: Any | None = None
-    plugin_tool: Any | None = None
-    skill_tool: Any | None = None
-    mcp_tool: Any | None = None
-    debugger: Any | None = None
-    executor: Any | None = None
+    artifact_service: ArtifactService | None = None
+    skill_loader: AstrBotSkillLoader | None = None
+    mcp_bridge: MCPBridge | None = None
+    workflow_engine: WorkflowEngine | None = None
+    dynamic_agent_manager: DynamicAgentManager | None = None
+    task_analyzer: TaskAnalyzer | None = None
+    capability_builder: AgentCapabilityBuilder | None = None
+    agent_coordinator: AgentCoordinator | None = None
+    meta_orchestrator: MetaOrchestrator | None = None
+    orchestrator: DynamicOrchestrator | None = None
+    plugin_tool: PluginManagerTool | None = None
+    skill_tool: SkillCreatorTool | None = None
+    mcp_tool: MCPConfiguratorTool | None = None
+    debugger: SelfDebugger | None = None
+    executor: ExecutionManager | None = None
 
     @classmethod
     def build(cls, context: Any, config: Any) -> "RuntimeContainer":
@@ -42,7 +79,7 @@ class RuntimeContainer:
         container._build_orchestrator()
         return container
 
-    def export_attributes(self) -> dict[str, Any]:
+    def export_attributes(self) -> _ExportAttributes:
         """导出给旧版插件对象绑定的组件映射。"""
 
         return {
@@ -75,57 +112,39 @@ class RuntimeContainer:
         except Exception as exc:
             logger.debug("停止执行器资源失败，忽略并继续: %s", exc)
 
+    async def __aenter__(self) -> "RuntimeContainer":
+        """异步上下文管理器入口。"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """异步上下文管理器出口 — 释放沙盒资源。"""
+        await self.astop()
+
     def _get_plugin_projects_dir(self) -> str:
         """获取插件的项目存储目录。
 
-        优先级:
-            1. `ASTRBOT_DATA_DIR` 环境变量 (容器/自定义部署)
-            2. `context.get_plugin_data_dir()` — AstrBot 新版注入的插件独立数据目录
-            3. `<cwd>/data/agent_projects` — `astrbot init` 后的标准布局
-            4. 最后才回退到 `/AstrBot/data/agent_projects` (官方 Docker 镜像约定)
+        尝试 ``context.get_plugin_data_dir()`` 后再委托给统一的
+        :func:`~shared.path_utils.resolve_projects_dir`，保持全局一致的
+        回退链。
         """
-        import os
         from pathlib import Path
 
-        candidates: list[str] = []
+        prefer: str | None = None
 
-        env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
-        if env_root:
-            candidates.append(os.path.join(env_root, "agent_projects"))
-
-        plugin_dir = None
         if hasattr(self.context, "get_plugin_data_dir"):
             try:
                 plugin_dir = self.context.get_plugin_data_dir()
+                if plugin_dir:
+                    prefer = str(Path(str(plugin_dir)) / "projects")
             except Exception as exc:
                 logger.debug("获取插件数据目录失败，尝试回退: %s", exc)
-        if plugin_dir:
-            candidates.append(os.path.join(str(plugin_dir), "projects"))
 
-        cwd_data = Path.cwd() / "data" / "agent_projects"
-        candidates.append(str(cwd_data))
+        from ..shared import resolve_projects_dir
 
-        candidates.append("/AstrBot/data/agent_projects")
-
-        chosen: str | None = None
-        for path in candidates:
-            try:
-                os.makedirs(path, exist_ok=True)
-            except OSError as exc:
-                logger.debug("无法在 %s 创建 agent_projects: %s", path, exc)
-                continue
-            chosen = path
-            break
-
-        if chosen is None:
-            # 所有候选都不可写 —— 回退到自带的臨时目录,确保不再抛出
-            import tempfile
-
-            chosen = tempfile.mkdtemp(prefix="astrbot_orchestrator_projects_")
-            logger.warning("所有标准位置都不可写，使用临时目录: %s", chosen)
-
-        logger.info("插件项目目录: %s", chosen)
-        return chosen
+        return resolve_projects_dir(
+            prefer_dir=prefer,
+            plugin_root=Path(__file__).resolve().parent.parent,
+        )
 
     def _build_core_tools(self) -> None:
         """构建与副作用相关的基础工具。"""

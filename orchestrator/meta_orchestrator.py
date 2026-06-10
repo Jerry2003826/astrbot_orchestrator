@@ -67,27 +67,17 @@ class MetaOrchestrator:
     def _get_plugin_projects_dir(self) -> str:
         """获取插件的项目存储目录。
 
-        这里是 `RuntimeContainer` 未注入 `artifact_service` 时的回退。
-        与 `RuntimeContainer._get_plugin_projects_dir` 保持相同的优先级:
-        `PERSIST_DIR` > `ASTRBOT_DATA_DIR` > `<cwd>/data/agent_projects` > 插件目录 > 临时目录。
+        优先使用 ``PERSIST_DIR`` 类属性，否则委托给统一的
+        :func:`~shared.path_utils.resolve_projects_dir`。
         """
-        if self.PERSIST_DIR:
-            return self.PERSIST_DIR
-
         from pathlib import Path
 
-        env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
-        if env_root:
-            return os.path.join(env_root, "agent_projects")
+        from ..shared import resolve_projects_dir
 
-        cwd_data = Path.cwd() / "data" / "agent_projects"
-        if cwd_data.parent.exists():
-            return str(cwd_data)
-
-        # 最后回退: 插件包目录下的 projects
-        current_file = Path(__file__).resolve()
-        plugin_root = current_file.parent.parent
-        return str(plugin_root / "projects")
+        return resolve_projects_dir(
+            prefer_dir=self.PERSIST_DIR or None,
+            plugin_root=Path(__file__).resolve().parent.parent,
+        )
 
     async def process(
         self,

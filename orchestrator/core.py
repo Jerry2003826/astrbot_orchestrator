@@ -133,41 +133,24 @@ class DynamicOrchestrator:
     def _get_projects_dir(self) -> str:
         """获取项目存储目录。
 
-        优先级:
-            1. ``meta_orchestrator.artifact_service.persist_dir`` (主渠道)
-            2. ``ASTRBOT_DATA_DIR`` / ``ASTRBOT_ROOT`` 环境变量
-            3. ``<cwd>/data/agent_projects``
-            4. ``/AstrBot/data/agent_projects``
-            5. 插件包目录下的 ``projects/`` (最后回退)
-            6. 系统临时目录
+        优先使用 ``meta_orchestrator.artifact_service.persist_dir``，
+        否则委托给统一的 :func:`~shared.path_utils.resolve_projects_dir`。
         """
-
-        import os
         from pathlib import Path
-        import tempfile
 
-        # 优先从 meta_orchestrator 的 artifact_service 获取
+        prefer: str | None = None
+
         if self.meta_orchestrator and hasattr(self.meta_orchestrator, "artifact_service"):
             artifact_service = self.meta_orchestrator.artifact_service
             if artifact_service and hasattr(artifact_service, "persist_dir"):
-                return artifact_service.persist_dir
+                prefer = artifact_service.persist_dir
 
-        candidates: list[Path] = []
-        env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
-        if env_root:
-            candidates.append(Path(env_root) / "agent_projects")
-        candidates.append(Path.cwd() / "data" / "agent_projects")
-        candidates.append(Path("/AstrBot/data/agent_projects"))
-        candidates.append(Path(__file__).resolve().parent.parent / "projects")
+        from ..shared import resolve_projects_dir
 
-        for path in candidates:
-            try:
-                os.makedirs(path, exist_ok=True)
-                return str(path)
-            except OSError:
-                continue
-
-        return tempfile.mkdtemp(prefix="astrbot_orchestrator_projects_")
+        return resolve_projects_dir(
+            prefer_dir=prefer,
+            plugin_root=Path(__file__).resolve().parent.parent,
+        )
 
     async def _run_model_text(
         self,
@@ -502,6 +485,18 @@ class DynamicOrchestrator:
             context=context,
         )
         return await self.process_request(request_context)
+
+    async def __aenter__(self) -> "DynamicOrchestrator":
+        """异步上下文管理器入口 — 确保退出时释放执行器资源。"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """异步上下文管理器出口 — 停止沙盒和执行器。"""
+        if self.executor and hasattr(self.executor, "astop"):
+            try:
+                await self.executor.astop()
+            except Exception:
+                logger.debug("执行器清理失败，忽略", exc_info=True)
 
     def _get_subagent_settings(self) -> Dict[str, Any]:
         settings = self.config.get("subagent_settings")

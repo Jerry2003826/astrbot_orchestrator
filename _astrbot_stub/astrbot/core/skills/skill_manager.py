@@ -1,0 +1,2 @@
+class SkillManager:
+    pass

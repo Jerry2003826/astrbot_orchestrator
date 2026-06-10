@@ -91,10 +91,24 @@ class OrchestratorPlugin(Star):
         self._initialized = False
 
     def _bind_runtime_components(self, runtime: RuntimeContainer) -> None:
-        """将运行时容器中的组件绑定回插件实例。"""
+        """将运行时容器中的组件显式绑定到插件实例，保留类型可追踪性。"""
 
-        for attr_name, component in runtime.export_attributes().items():
-            setattr(self, attr_name, component)
+        attrs = runtime.export_attributes()
+
+        self.orchestrator = attrs.get("orchestrator")
+        self.meta_orchestrator = attrs.get("meta_orchestrator")
+        self.skill_loader = attrs.get("skill_loader")
+        self.mcp_bridge = attrs.get("mcp_bridge")
+        self.workflow_engine = attrs.get("workflow_engine")
+        self.dynamic_agent_manager = attrs.get("dynamic_agent_manager")
+        self.task_analyzer = attrs.get("task_analyzer")
+        self.agent_coordinator = attrs.get("agent_coordinator")
+        self.capability_builder = attrs.get("capability_builder")
+        self.plugin_tool = attrs.get("plugin_tool")
+        self.skill_tool = attrs.get("skill_tool")
+        self.mcp_tool = attrs.get("mcp_tool")
+        self.debugger = attrs.get("debugger")
+        self.executor = attrs.get("executor")
 
     def _build_request_context(
         self,
