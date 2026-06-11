@@ -9,12 +9,9 @@
 
 from collections import deque
 from datetime import datetime
-import logging
 import sys
 import traceback
 from typing import Any, ClassVar, cast
-
-logger = logging.getLogger(__name__)
 
 
 class SelfDebugger:
@@ -162,11 +159,11 @@ class SelfDebugger:
             lines.append(f"• 插件: {len(active_stars)} 个激活")
 
             # 检查模型提供商
-            providers = self.context.provider_manager.get_all_providers()
+            providers = self.context.get_all_providers()
             lines.append(f"• 模型提供商: {len(providers)} 个")
 
             # 检查 MCP 服务
-            mcp_clients = getattr(self.context.provider_manager.llm_tools, "mcp_client_dict", {})
+            mcp_clients = getattr(self.context.get_llm_tool_manager(), "mcp_client_dict", {})
             active_mcp = [c for c in mcp_clients.values() if c.active]
             lines.append(f"• MCP 服务: {len(active_mcp)} 个连接")
 

@@ -138,6 +138,11 @@ class FakeContext:
         self._stars_error = stars_error
         self._registered_stars = dict(registered_stars or {})
 
+    def get_config(self, umo: Any = None) -> Any:
+        """返回全局配置（对齐 v4.25.5 公开 API）。"""
+
+        return self._config
+
     def get_all_stars(self) -> list[Any]:
         """返回插件列表或按需抛出异常。"""
 

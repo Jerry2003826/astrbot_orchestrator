@@ -1,114 +1,61 @@
 {
   "llm_provider": {
-    "description": "选择用于编排和代码生成的大语言模型",
+    "description": "用于 /agent 任务的大语言模型",
     "type": "string",
-    "hint": "选择一个已配置的模型提供商，用于 Agent 的意图识别、代码生成等任务",
+    "hint": "留空则跟随会话当前使用的聊天模型",
     "_special": "select_provider"
   },
-  "enable_natural_language_control": {
-    "description": "启用自然语言 LLM 路由入口",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后普通消息会先由模型判断是否需要交给编排器；不是关键词/正则路由"
-  },
-  "natural_language_router_scope": {
-    "description": "自然语言路由范围",
-    "type": "string",
-    "default": "direct",
-    "hint": "direct=仅私聊或 @/唤醒机器人后交给模型判断；all=所有普通消息都交给模型判断"
-  },
   "max_iterations": {
-    "description": "Agent 自主执行的最大步骤数",
+    "description": "Agent 工具循环的最大步骤数",
     "type": "int",
     "default": 10,
-    "hint": "防止无限循环，超过此次数会自动停止"
-  },
-  "max_parallel_tasks": {
-    "description": "同时执行的最大任务数",
-    "type": "int",
-    "default": 3
+    "hint": "传给 tool_loop_agent 的 max_steps，防止无限循环"
   },
   "task_timeout": {
-    "description": "单个任务的最大执行时间（秒）",
+    "description": "单个 /agent 任务的最大执行时间（秒）",
     "type": "int",
     "default": 120
   },
   "enable_plugin_management": {
-    "description": "允许搜索/安装/卸载插件",
+    "description": "注册插件管理工具（plugin_search/install/...）",
     "type": "bool",
     "default": true,
-    "hint": "开启后 Agent 可以自动搜索和安装插件"
+    "hint": "开启后默认 Agent 与 /agent 可以搜索和安装插件"
   },
   "enable_skill_creation": {
-    "description": "允许动态创建 Skill",
+    "description": "注册 Skill 工具（skill_create/read/list/delete）",
     "type": "bool",
-    "default": true,
-    "hint": "开启后 Agent 可以自动创建 SKILL.md 文件"
+    "default": true
   },
   "enable_mcp_config": {
-    "description": "允许配置 MCP 服务",
+    "description": "注册 MCP 配置工具（mcp_add/remove/test/...）",
     "type": "bool",
-    "default": true,
-    "hint": "开启后 Agent 可以自动配置 MCP 服务器"
+    "default": true
   },
   "enable_code_execution": {
-    "description": "允许执行代码（使用 AstrBot 全局沙盒配置）",
+    "description": "注册代码执行工具（sandbox_exec_python/bash 等）",
     "type": "bool",
     "default": true,
-    "hint": "开启后 Agent 可以执行代码，将使用 AstrBot 配置文件中的沙盒设置"
+    "hint": "执行环境（local/sandbox）使用 AstrBot 全局沙盒配置"
   },
-  "show_thinking_process": {
-    "description": "在回复中显示 AI 的思考和决策过程",
+  "enable_self_debug": {
+    "description": "注册诊断工具（debug_status/debug_recent_errors）",
+    "type": "bool",
+    "default": true
+  },
+  "enable_workflows": {
+    "description": "注册 YAML 工作流工具（workflow_list/workflow_run）",
+    "type": "bool",
+    "default": true
+  },
+  "enable_dynamic_agents": {
+    "description": "启动时把预设子代理模板注册到官方 subagent_orchestrator",
     "type": "bool",
     "default": true,
-    "hint": "开启后会在回复开头显示 Agent 的分析过程"
+    "hint": "也可随时用 /agent sync 手动同步；子代理执行由官方 HandoffTool 体系承担"
   },
   "debug_mode": {
     "description": "输出详细的执行日志到控制台",
-    "type": "bool",
-    "default": false,
-    "hint": "调试时开启，会输出更多日志信息"
-  },
-  "enable_dynamic_agents": {
-    "description": "启用动态 SubAgent 编排",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后将自动创建多个 SubAgent 协作完成任务"
-  },
-  "max_concurrent_agents": {
-    "description": "动态 SubAgent 最大并发数",
-    "type": "int",
-    "default": 5
-  },
-  "agent_timeout": {
-    "description": "SubAgent 单次任务超时（秒）",
-    "type": "int",
-    "default": 300
-  },
-  "auto_cleanup_agents": {
-    "description": "任务完成后自动清理 SubAgent",
-    "type": "bool",
-    "default": true
-  },
-  "use_llm_task_analyzer": {
-    "description": "使用 LLM 分析任务并生成 SubAgent 计划",
-    "type": "bool",
-    "default": true
-  },
-  "force_subagents_for_complex_tasks": {
-    "description": "复杂任务强制走 SubAgent",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后，复杂/多步骤任务始终使用 SubAgent 编排"
-  },
-  "subagent_template_overrides": {
-    "description": "SubAgent 模板覆盖配置(JSON)",
-    "type": "string",
-    "default": "",
-    "hint": "JSON 格式：{\"code\": {\"name\": \"code_agent\", \"system_prompt\": \"...\", \"public_description\": \"...\", \"tools\": [\"sandbox\"]}}"
-  },
-  "subagent_verbose_logs": {
-    "description": "输出 SubAgent 详细执行日志",
     "type": "bool",
     "default": false
   },

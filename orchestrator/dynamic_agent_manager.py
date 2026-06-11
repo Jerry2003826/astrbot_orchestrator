@@ -1,415 +1,150 @@
-"""
-动态 SubAgent 管理器 - 持久化版本
+"""官方 SubAgent 配置适配器。
 
-创建的 SubAgents 会保存到 AstrBot 配置文件，在 UI 中可见
+把 agent_templates.py 中的预设模板写入宿主全局配置的
+``subagent_orchestrator.agents``，并触发官方 ``reload_from_config``；
+子代理的实际执行完全由官方 HandoffTool 体系承担。
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import json
-import os
-from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from astrbot.api import logger as astrbot_logger
+from astrbot.api import logger
 
-from .agent_registry import AgentRecord, AgentRegistry
-from .agent_templates import AgentSpec, AgentTemplateLibrary
+from .agent_templates import AgentTemplateLibrary
 
-logger = astrbot_logger
-
-
-def _resolve_astrbot_data_root() -> Path:
-    """解析 AstrBot `data/` 根目录,兼容官方 Docker 和本地 `astrbot init` 两种布局。
-
-    注: 这个函数被设计为每次调用时都重新解析一次。早期版本在 import 时
-    就冻结为模块级常量,导致用户在 runtime 之后才 `os.chdir()` 或设置
-    `ASTRBOT_DATA_DIR` 时不生效。
-    """
-
-    env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
-    if env_root:
-        return Path(env_root)
-
-    cwd_data = Path.cwd() / "data"
-    if cwd_data.exists():
-        return cwd_data
-
-    return Path("/AstrBot/data")  # 官方 Docker 镜像回退
-
-
-def _config_path() -> str:
-    """运行时解析 `cmd_config.json` 路径,而不是用 import 时冻结的常量。"""
-    return str(_resolve_astrbot_data_root() / "cmd_config.json")
-
-
-def _plugin_config_path() -> str:
-    """运行时解析插件配置 JSON 路径。"""
-    return str(_resolve_astrbot_data_root() / "config" / "astrbot_orchestrator_config.json")
-
-
-# 保留模块级常量作为向后兼容 (测试/老代码调用) —— 但实际的 open() 均通过
-# 调用上面的 getter 函数获取最新路径。
-CONFIG_PATH = _config_path()
-PLUGIN_CONFIG_PATH = _plugin_config_path()
-
-
-def _utcnow() -> datetime:
-    """返回当前 UTC 时间。"""
-
-    return datetime.now(timezone.utc)
+MANAGED_FLAG = "managed_by"
+MANAGED_VALUE = "astrbot_orchestrator_v5"
 
 
 class DynamicAgentManager:
-    """动态创建/销毁 SubAgent，并持久化到 AstrBot 配置"""
+    """将插件预设子代理同步到官方 subagent_orchestrator 配置。"""
 
-    def __init__(
-        self,
-        context: Any,
-        config: dict[str, Any] | None = None,
-    ) -> None:
-        """初始化动态代理管理器。"""
-
+    def __init__(self, context: Any, config: Any | None = None) -> None:
         self.context = context
         self.config = config or {}
-        self.registry = AgentRegistry()
-        self.template_library = AgentTemplateLibrary(self._load_template_overrides())
-        self._dynamic_agents: dict[str, AgentSpec] = {}
+        self.template_library = AgentTemplateLibrary()
 
-    def _get_default_provider_id(self) -> str:
-        """获取默认的 LLM provider ID"""
-        # 优先从 orchestrator 配置获取
-        if isinstance(self.config, dict):
-            provider = self.config.get("llm_provider")
-            if provider:
-                return cast(str, provider)
+    # ------------------------------------------------------------------
+    # 模板同步
+    # ------------------------------------------------------------------
 
-        # 从插件配置文件获取
-        try:
-            with open(_plugin_config_path(), "r", encoding="utf-8-sig") as f:
-                orch_config = cast(dict[str, Any], json.load(f))
-            provider = orch_config.get("llm_provider")
-            if provider:
-                return cast(str, provider)
-        except Exception as exc:
-            logger.warning("读取 orchestrator 插件配置失败: %s", exc)
+    def _get_subagent_cfg(self) -> tuple[Any, dict[str, Any]]:
+        """返回 (全局配置对象, subagent_orchestrator 段)。"""
 
-        # 默认值
-        return "openai_1/qwen-max-latest"
+        conf = self.context.get_config()
+        so_cfg = conf.setdefault("subagent_orchestrator", {})
+        if not isinstance(so_cfg, dict):
+            so_cfg = {}
+            conf["subagent_orchestrator"] = so_cfg
+        return conf, so_cfg
 
-    def _load_template_overrides(self) -> dict[str, Any]:
-        """读取模板 override 配置。"""
+    async def sync_templates_to_host(self) -> str:
+        """把模板库中的预设写入官方配置并热重载 handoffs。
 
-        overrides: dict[str, Any] | str | None = None
-        if isinstance(self.config, dict):
-            overrides = self.config.get("subagent_template_overrides")
-            if not overrides:
-                settings = self.config.get("subagent_settings", {})
-                if isinstance(settings, dict):
-                    overrides = settings.get("subagent_template_overrides")
+        已存在的同名 agent（无论是否本插件管理）不会被覆盖。
+        """
 
-        if isinstance(overrides, dict):
-            return overrides
-        if isinstance(overrides, str) and overrides.strip():
+        conf, so_cfg = self._get_subagent_cfg()
+        agents: list[dict[str, Any]] = so_cfg.setdefault("agents", [])
+        if not isinstance(agents, list):
+            agents = []
+            so_cfg["agents"] = agents
+
+        existing_names = {
+            str(item.get("name", "")).strip() for item in agents if isinstance(item, dict)
+        }
+
+        added: list[str] = []
+        for role in self.template_library.list_roles():
+            template = self.template_library.get(role)
+            if template is None or template.name in existing_names:
+                continue
+            spec = template.to_spec()
+            entry = spec.to_config()
+            entry[MANAGED_FLAG] = MANAGED_VALUE
+            agents.append(entry)
+            added.append(template.name)
+
+        # 让 handoffs 注入主 Agent（用户显式配置过则不动）
+        so_cfg.setdefault("main_enable", True)
+
+        if added:
             try:
-                return cast(dict[str, Any], json.loads(overrides))
+                conf.save_config()
             except Exception:
-                logger.warning("解析 subagent_template_overrides 失败")
-        return {}
+                logger.warning("保存 subagent 配置失败", exc_info=True)
 
-    def _get_subagent_orchestrator(self) -> Any | None:
-        """获取运行时 SubAgent orchestrator。"""
+        await self._reload_host(so_cfg)
+        if added:
+            return f"已注册 {len(added)} 个预设子代理: {', '.join(added)}"
+        return "预设子代理均已存在，无需更新。"
 
-        return getattr(self.context, "subagent_orchestrator", None)
+    async def remove_managed_agents(self) -> str:
+        """移除本插件写入的子代理配置。"""
 
-    def _get_tool_manager(self) -> Any | None:
-        """获取 LLM 工具管理器。"""
+        conf, so_cfg = self._get_subagent_cfg()
+        agents = so_cfg.get("agents", [])
+        if not isinstance(agents, list):
+            return "配置格式异常，未做修改。"
 
-        try:
-            return self.context.provider_manager.llm_tools
-        except AttributeError:
-            return None
-
-    def _load_base_agents(self) -> list[dict[str, Any]]:
-        """加载基础 agents（非动态创建的）"""
-        try:
-            # 优先从内存配置读取
-            astrbot_config = self._get_astrbot_config()
-            if astrbot_config is not None:
-                subagent_cfg = cast(
-                    dict[str, Any],
-                    astrbot_config.get("subagent_orchestrator", {}),
-                )
-            else:
-                # 备选：从文件读取
-                with open(_config_path(), "r", encoding="utf-8-sig") as f:
-                    cfg = cast(dict[str, Any], json.load(f))
-                subagent_cfg = cast(dict[str, Any], cfg.get("subagent_orchestrator", {}))
-
-            agents = subagent_cfg.get("agents", [])
-            if isinstance(agents, list):
-                return [a for a in agents if not a.get("_dynamic_", False)]
-        except Exception as e:
-            logger.warning("加载配置失败: %s", e)
-        return []
-
-    async def create_agents(self, specs: list[AgentSpec]) -> list[AgentSpec]:
-        """创建动态 agents 并持久化到配置"""
-        created: list[AgentSpec] = []
-        name_counts: dict[str, int] = {}
-
-        # 获取默认 provider_id
-        default_provider = self._get_default_provider_id()
-
-        for spec in specs:
-            # 自动设置 provider_id
-            if not spec.provider_id:
-                spec.provider_id = default_provider
-
-            name_counts.setdefault(spec.name, 0)
-            name_counts[spec.name] += 1
-            if name_counts[spec.name] > 1:
-                spec.name = f"{spec.name}_{name_counts[spec.name]}"
-
-            self._dynamic_agents[spec.agent_id] = spec
-            self.registry.register(
-                AgentRecord(
-                    agent_id=spec.agent_id,
-                    name=spec.name,
-                    role=spec.role,
-                    status="active",
-                    created_at=_utcnow(),
-                    spec=spec,
-                    metadata=spec.metadata,
-                )
-            )
-            created.append(spec)
-
-        # 持久化到配置文件并重新加载
-        await self._save_to_config()
-        await self._reload_subagents()
-
-        logger.info("动态 SubAgent 创建完成并已保存: %s", [a.name for a in created])
-        return created
-
-    async def cleanup(self, specs: list[AgentSpec]) -> None:
-        """清理动态 agents（可选，用户可以在 UI 中手动管理）"""
-        agent_ids = [spec.agent_id for spec in specs]
-        agent_names = {spec.name for spec in specs}
-
-        for spec in specs:
-            self._dynamic_agents.pop(spec.agent_id, None)
-            self.registry.remove(spec.agent_id)
-
-        # 从配置文件中移除
-        await self._remove_from_config(agent_ids, names_to_remove=agent_names)
-        await self._reload_subagents()
-
-    def list_agents(self) -> str:
-        """返回动态 agent 摘要。"""
-
-        return cast(str, self.registry.summary())
-
-    def get_template_config(self) -> dict[str, Any]:
-        """返回当前模板导出配置。"""
-
-        return cast(dict[str, Any], self.template_library.export_templates())
-
-    def _get_astrbot_config(self) -> Any | None:
-        """获取 AstrBot 内存中的配置对象"""
-        try:
-            # 优先通过 context.get_config() 获取
-            if hasattr(self.context, "get_config"):
-                return self.context.get_config()
-            # 备选：直接访问 astrbot_config 属性
-            if hasattr(self.context, "astrbot_config"):
-                return self.context.astrbot_config
-        except Exception as e:
-            logger.warning("获取 AstrBot 配置对象失败: %s", e)
-        return None
-
-    async def _save_to_config(self) -> None:
-        """将动态 agents 持久化到 AstrBot 配置（内存+文件）"""
-        try:
-            # 尝试获取内存中的配置对象
-            astrbot_config = self._get_astrbot_config()
-
-            if astrbot_config is not None:
-                # 方案A: 通过内存配置对象更新（WebUI 实时可见）
-                await self._save_to_memory_config(astrbot_config)
-            else:
-                # 方案B: 直接写文件（备选）
-                await self._save_to_file_config()
-
-        except Exception as e:
-            logger.error("保存 SubAgent 配置失败: %s", e, exc_info=True)
-
-    async def _save_to_memory_config(self, astrbot_config: Any) -> None:
-        """通过内存配置对象保存（WebUI 实时可见）"""
-        # 获取或创建 subagent_orchestrator 配置
-        if "subagent_orchestrator" not in astrbot_config:
-            astrbot_config["subagent_orchestrator"] = {"main_enable": True, "agents": []}
-
-        subagent_config = astrbot_config["subagent_orchestrator"]
-        if "agents" not in subagent_config:
-            subagent_config["agents"] = []
-
-        existing_agents = subagent_config["agents"]
-
-        # 保留非动态的 agents，移除旧的动态 agents
-        existing_agents = [a for a in existing_agents if not a.get("_dynamic_", False)]
-
-        # 添加新的动态 agents
-        for spec in self._dynamic_agents.values():
-            agent_config = spec.to_config()
-            agent_config["_dynamic_"] = True  # 标记为动态创建
-            agent_config["enabled"] = True
-            agent_config["_created_at_"] = _utcnow().isoformat()
-            existing_agents.append(agent_config)
-
-        subagent_config["agents"] = existing_agents
-
-        # 同步保存到文件
-        if hasattr(astrbot_config, "save_config"):
-            astrbot_config.save_config()
-            logger.info(
-                "动态 SubAgents 已保存到内存配置和文件 (共 %d 个)", len(self._dynamic_agents)
-            )
-        else:
-            # 如果没有 save_config 方法，手动写文件
-            await self._save_to_file_config()
-
-    async def _save_to_file_config(self) -> None:
-        """直接写入配置文件（备选方案）"""
-        config_path = _config_path()
-        with open(config_path, "r", encoding="utf-8-sig") as f:
-            config = cast(dict[str, Any], json.load(f))
-
-        if "subagent_orchestrator" not in config:
-            config["subagent_orchestrator"] = {"main_enable": True, "agents": []}
-
-        subagent_config = config["subagent_orchestrator"]
-        if "agents" not in subagent_config:
-            subagent_config["agents"] = []
-
-        existing_agents = subagent_config["agents"]
-        existing_agents = [a for a in existing_agents if not a.get("_dynamic_", False)]
-
-        for spec in self._dynamic_agents.values():
-            agent_config = spec.to_config()
-            agent_config["_dynamic_"] = True
-            agent_config["enabled"] = True
-            agent_config["_created_at_"] = _utcnow().isoformat()
-            existing_agents.append(agent_config)
-
-        subagent_config["agents"] = existing_agents
-
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-
-        logger.info("动态 SubAgents 已保存到配置文件 (共 %d 个)", len(self._dynamic_agents))
-
-    async def _remove_from_config(
-        self,
-        agent_ids: list[str],
-        names_to_remove: set[str] | None = None,
-    ) -> None:
-        """从配置中移除指定的动态 agents（内存+文件）"""
-        try:
-            # 获取要移除的 agent 名称
-            pending_names = set(names_to_remove or set())
-            for aid in agent_ids:
-                spec = self._dynamic_agents.get(aid)
-                if spec:
-                    pending_names.add(spec.name)
-
-            if not pending_names:
-                return
-
-            # 尝试通过内存配置更新
-            astrbot_config = self._get_astrbot_config()
-
-            if astrbot_config is not None and "subagent_orchestrator" in astrbot_config:
-                subagent_config = astrbot_config["subagent_orchestrator"]
-                if "agents" in subagent_config:
-                    subagent_config["agents"] = [
-                        a for a in subagent_config["agents"] if a.get("name") not in pending_names
-                    ]
-                    if hasattr(astrbot_config, "save_config"):
-                        astrbot_config.save_config()
-                        logger.info("已从内存配置和文件中移除 SubAgents: %s", pending_names)
-                        return
-
-            # 备选：直接操作文件
-            config_path = _config_path()
-            with open(config_path, "r", encoding="utf-8-sig") as f:
-                config = cast(dict[str, Any], json.load(f))
-
-            if "subagent_orchestrator" not in config:
-                return
-
-            subagent_config = config["subagent_orchestrator"]
-            if "agents" not in subagent_config:
-                return
-
-            subagent_config["agents"] = [
-                a for a in subagent_config["agents"] if a.get("name") not in pending_names
-            ]
-
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
-
-            logger.info("已从配置文件中移除 SubAgents: %s", pending_names)
-        except Exception as e:
-            logger.error("移除 SubAgent 配置失败: %s", e, exc_info=True)
-
-    async def _reload_subagents(self) -> None:
-        """重新加载 SubAgents 到内存"""
-        orchestrator = self._get_subagent_orchestrator()
-        if not orchestrator:
-            logger.warning("SubAgentOrchestrator 不可用，无法注册动态 SubAgent")
-            return
-
-        # 优先从内存配置读取
-        subagent_config = {}
-        astrbot_config = self._get_astrbot_config()
-
-        if astrbot_config is not None:
-            subagent_config = cast(
-                dict[str, Any],
-                astrbot_config.get("subagent_orchestrator", {}),
-            )
-        else:
-            # 备选：从文件读取
+        kept = [
+            item
+            for item in agents
+            if not (isinstance(item, dict) and item.get(MANAGED_FLAG) == MANAGED_VALUE)
+        ]
+        removed = len(agents) - len(kept)
+        if removed:
+            so_cfg["agents"] = kept
             try:
-                with open(_config_path(), "r", encoding="utf-8-sig") as f:
-                    config = cast(dict[str, Any], json.load(f))
-                subagent_config = cast(dict[str, Any], config.get("subagent_orchestrator", {}))
-            except Exception as e:
-                logger.error("读取配置文件失败: %s", e)
+                conf.save_config()
+            except Exception:
+                logger.warning("保存 subagent 配置失败", exc_info=True)
+            await self._reload_host(so_cfg)
+        return f"已移除 {removed} 个由本插件管理的子代理。"
 
-        try:
-            await orchestrator.reload_from_config(subagent_config)
-            await self._register_handoffs(orchestrator)
-        except Exception as e:
-            logger.error("注册 SubAgent 失败: %s", e, exc_info=True)
-
-    async def _register_handoffs(self, orchestrator: Any) -> None:
-        """注册 handoff 工具"""
-        tool_manager = self._get_tool_manager()
-        if not tool_manager:
+    async def _reload_host(self, so_cfg: dict[str, Any]) -> None:
+        orchestrator = getattr(self.context, "subagent_orchestrator", None)
+        if orchestrator is None:
+            logger.warning("宿主未初始化 subagent_orchestrator，跳过热重载")
             return
+        try:
+            await orchestrator.reload_from_config(so_cfg)
+        except Exception:
+            logger.error("subagent_orchestrator 热重载失败", exc_info=True)
 
-        handoffs = getattr(orchestrator, "handoffs", [])
+    # ------------------------------------------------------------------
+    # 状态查询（读官方 handoffs）
+    # ------------------------------------------------------------------
+
+    def status_report(self) -> str:
+        orchestrator = getattr(self.context, "subagent_orchestrator", None)
+        handoffs = list(getattr(orchestrator, "handoffs", None) or [])
         if not handoffs:
-            return
+            return (
+                "当前没有已注册的子代理。\n"
+                "可用 /agent sync 注册本插件预设模板，或在 WebUI 的子代理设置中添加。"
+            )
+        lines = [f"已注册子代理 ({len(handoffs)}):"]
+        for handoff in handoffs:
+            agent = getattr(handoff, "agent", None)
+            name = getattr(agent, "name", None) or getattr(handoff, "name", "?")
+            desc = (getattr(handoff, "description", "") or "").strip()
+            provider = getattr(handoff, "provider_id", None)
+            line = f"- {name}"
+            if provider:
+                line += f" (provider: {provider})"
+            if desc:
+                line += f": {desc[:80]}"
+            lines.append(line)
+        return "\n".join(lines)
 
-        try:
-            if hasattr(tool_manager, "register_tools"):
-                tool_manager.register_tools(handoffs)
-            elif hasattr(tool_manager, "register_tool"):
-                for handoff in handoffs:
-                    tool_manager.register_tool(handoff)
-        except Exception as e:
-            logger.warning("注册 Handoff 工具失败: %s", e)
+    def templates_report(self) -> str:
+        data = self.template_library.export_templates()
+        lines = [f"预设子代理模板 ({len(data)}):"]
+        for role, info in data.items():
+            tools = ", ".join(info.get("tools") or []) or "继承全部工具"
+            lines.append(f"- {role} → {info['name']}（工具: {tools}）")
+            lines.append(f"  {info['public_description']}")
+        lines.append("\n用 /agent sync 将模板注册为官方子代理。")
+        return "\n".join(lines)

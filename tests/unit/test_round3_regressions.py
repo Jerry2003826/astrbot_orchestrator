@@ -1,25 +1,18 @@
-"""第三轮 bug 修复回归测试。
+"""第三轮 bug 修复回归测试（sandbox 部分）。
 
 覆盖:
     - Bug O/P: LocalSandbox.astream_exec timeout 生效 + stderr 缓冲区大时不死锁
     - Bug Q: ainstall 拒绝 shell 注入 (LocalSandbox + 基类 CodeSandbox)
-    - Bug R: DynamicAgentManager 的路径 getter 每次重新解析
-    - Bug S: agent_coordinator 的 projects_dir 优先级链
+
+注：原 Bug R/S 针对的旧 DynamicAgentManager 路径解析与 AgentCoordinator
+已随官方化迁移删除，相关测试一并移除。
 """
 
 from __future__ import annotations
 
 import asyncio
-import importlib
-import logging
-from pathlib import Path
-import sys
-from types import ModuleType
 
 import pytest
-
-LOGGER_NAME = "astrbot_orchestrator_v5.tests.round3"
-
 
 # ─────────────────────────────────────────────────────────────────
 # Bug O: LocalSandbox.astream_exec timeout 真正生效
@@ -127,129 +120,3 @@ def test_base_ainstall_source_uses_shlex_quote() -> None:
     assert "pip install {pkg_str}" not in src, (
         f"CodeSandbox.ainstall 仍在直接拼接未转义的包名:\n{src}"
     )
-
-
-# ─────────────────────────────────────────────────────────────────
-# Bug R: dynamic_agent_manager 路径 getter 运行时解析
-# ─────────────────────────────────────────────────────────────────
-
-
-def _load_dam_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """为测试安装假 astrbot 依赖并 import 目标模块。"""
-    astrbot_module = ModuleType("astrbot")
-    api_module = ModuleType("astrbot.api")
-    api_module.logger = logging.getLogger(LOGGER_NAME)  # type: ignore[attr-defined]
-    astrbot_module.api = api_module  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "astrbot", astrbot_module)
-    monkeypatch.setitem(sys.modules, "astrbot.api", api_module)
-    monkeypatch.delitem(
-        sys.modules,
-        "astrbot_orchestrator_v5.orchestrator.dynamic_agent_manager",
-        raising=False,
-    )
-    return importlib.import_module("astrbot_orchestrator_v5.orchestrator.dynamic_agent_manager")
-
-
-def test_config_path_resolves_at_call_time_not_import_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    dam = _load_dam_module(monkeypatch)
-
-    new_root = tmp_path / "runtime_data"
-    new_root.mkdir()
-
-    monkeypatch.setenv("ASTRBOT_DATA_DIR", str(new_root))
-
-    resolved_cfg = dam._config_path()
-    resolved_plugin = dam._plugin_config_path()
-
-    assert str(new_root) in resolved_cfg, f"_config_path 未响应环境变量: {resolved_cfg}"
-    assert resolved_cfg.endswith("cmd_config.json")
-    assert str(new_root) in resolved_plugin
-    assert resolved_plugin.endswith("astrbot_orchestrator_config.json")
-
-
-def test_resolve_astrbot_data_root_priority(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    dam = _load_dam_module(monkeypatch)
-
-    monkeypatch.setenv("ASTRBOT_DATA_DIR", "/custom/data")
-    assert str(dam._resolve_astrbot_data_root()) == "/custom/data"
-
-
-# ─────────────────────────────────────────────────────────────────
-# Bug S: agent_coordinator projects_dir 优先级
-# ─────────────────────────────────────────────────────────────────
-
-
-def test_agent_coordinator_projects_dir_prefers_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """模拟 AgentCoordinator._get_plugin_projects_dir —— 该方法不依赖 self,
-    直接反射调用即可,不必完整构造协调器。"""
-
-    import importlib
-
-    from astrbot_orchestrator_v5.orchestrator import (
-        agent_coordinator as ac_module,
-    )
-
-    importlib.reload(ac_module)  # 清缓存,避免其他测试污染
-    env_root = tmp_path / "userdata"
-    env_root.mkdir()
-
-    monkeypatch.setenv("ASTRBOT_DATA_DIR", str(env_root))
-
-    # 绕开 __init__: 用 __new__ 创建空实例,调用 bound method
-    instance = ac_module.AgentCoordinator.__new__(ac_module.AgentCoordinator)
-    resolved = instance._get_plugin_projects_dir()
-
-    assert str(env_root) in resolved, f"未优先使用 ASTRBOT_DATA_DIR,实际落到: {resolved}"
-    assert resolved.endswith("agent_projects")
-
-
-def test_agent_coordinator_projects_dir_falls_back_to_cwd_data(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from astrbot_orchestrator_v5.orchestrator import (
-        agent_coordinator as ac_module,
-    )
-
-    # 清除 env,cwd 有 data/ 目录时应落入其中
-    monkeypatch.delenv("ASTRBOT_DATA_DIR", raising=False)
-    monkeypatch.delenv("ASTRBOT_ROOT", raising=False)
-
-    (tmp_path / "data").mkdir()
-    monkeypatch.chdir(tmp_path)
-
-    instance = ac_module.AgentCoordinator.__new__(ac_module.AgentCoordinator)
-    resolved = instance._get_plugin_projects_dir()
-
-    # 应落在 cwd/data/agent_projects 下
-    assert resolved.endswith("agent_projects"), f"实际: {resolved}"
-    assert str(tmp_path) in resolved, f"未落到 cwd 下的 data/agent_projects,实际: {resolved}"
-
-
-# ─────────────────────────────────────────────────────────────────
-# 回归: 上一轮 `/AstrBot` 硬编码已修复 —— 确认仍未回退
-# ─────────────────────────────────────────────────────────────────
-
-
-def test_no_more_hardcoded_astrbot_root_as_only_path(tmp_path: Path) -> None:
-    """在非 Docker 环境下,任何地方都不该把 /AstrBot 作为唯一选项。"""
-    import inspect
-
-    import astrbot_orchestrator_v5.orchestrator.agent_coordinator as ac
-    import astrbot_orchestrator_v5.orchestrator.core as core_mod
-
-    src_ac = inspect.getsource(ac.AgentCoordinator._get_plugin_projects_dir)
-    src_core = inspect.getsource(core_mod)
-
-    # 如果源码中出现 /AstrBot,必须是候选之一而非唯一路径
-    for src, name in [(src_ac, "agent_coordinator"), (src_core, "core")]:
-        if "/AstrBot" in src:
-            # 必须同时出现 ASTRBOT_DATA_DIR 或 candidates 之类的多候选标记
-            assert (
-                "ASTRBOT_DATA_DIR" in src or "candidates" in src.lower() or "ASTRBOT_ROOT" in src
-            ), f"{name} 仍把 /AstrBot 当唯一路径"

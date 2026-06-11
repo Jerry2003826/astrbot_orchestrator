@@ -91,10 +91,17 @@ class FakeContext:
     ) -> None:
         """保存工具管理器与 LLM 预设行为。"""
 
-        self.provider_manager = SimpleNamespace(llm_tools=tool_manager)
+        self._tool_manager = tool_manager
         self._llm_responses = list(llm_responses or [])
         self._llm_error = llm_error
         self.llm_calls: list[dict[str, Any]] = []
+
+    def get_llm_tool_manager(self) -> Any:
+        """返回工具管理器（对齐 v4.25.5 公开 API）。"""
+
+        if self._tool_manager is None:
+            raise RuntimeError("tool manager unavailable")
+        return self._tool_manager
 
     async def llm_generate(self, **kwargs: Any) -> SimpleNamespace:
         """记录调用并返回预设完成文本。"""
@@ -208,10 +215,22 @@ def test_mcp_configurator_get_tool_manager_handles_missing_provider_manager() ->
     assert tool._get_tool_manager() is None
 
 
-def test_mcp_configurator_get_mcp_config_path_supports_import_and_fallback(
+def test_mcp_configurator_get_mcp_config_path_prefers_tool_manager(
     monkeypatch: "MonkeyPatch",
 ) -> None:
-    """配置路径应优先使用 AstrBot 数据目录，并在导入失败时回退。"""
+    """配置路径应优先取宿主 tool_manager.mcp_config_path（mcp_server.json）。"""
+
+    manager = FakeToolManager()
+    manager.mcp_config_path = "/host/data/mcp_server.json"
+    tool = MCPConfiguratorTool(context=FakeContext(tool_manager=manager))
+
+    assert tool._get_mcp_config_path() == "/host/data/mcp_server.json"
+
+
+def test_mcp_configurator_get_mcp_config_path_falls_back_to_data_dir(
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """工具管理器不可用时回退到 data/mcp_server.json。"""
 
     tool = MCPConfiguratorTool(context=FakeContext())
     original_import = builtins.__import__
@@ -232,27 +251,9 @@ def test_mcp_configurator_get_mcp_config_path_supports_import_and_fallback(
         return original_import(name, globals_dict, locals_dict, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", import_success)
-    assert tool._get_mcp_config_path() == "/tmp/astrbot-data/mcp_config.json"
+    expected = mcp_module.os.path.join("/tmp/astrbot-data", "mcp_server.json")
 
-    def import_failure(
-        name: str,
-        globals_dict: dict[str, Any] | None = None,
-        locals_dict: dict[str, Any] | None = None,
-        fromlist: tuple[str, ...] = (),
-        level: int = 0,
-    ) -> Any:
-        """对 AstrBot 路径模块模拟 ImportError。"""
-
-        if name == "astrbot.core.utils.astrbot_path":
-            raise ImportError("missing")
-        return original_import(name, globals_dict, locals_dict, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", import_failure)
-    monkeypatch.setattr(
-        mcp_module.os.path, "expanduser", lambda path: "/tmp/fallback/mcp_config.json"
-    )
-
-    assert tool._get_mcp_config_path() == "/tmp/fallback/mcp_config.json"
+    assert tool._get_mcp_config_path() == expected
 
 
 @pytest.mark.parametrize(

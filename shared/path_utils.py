@@ -1,26 +1,37 @@
-"""项目目录解析 — 统一来自 RuntimeContainer / DynamicOrchestrator / MetaOrchestrator
-的重复回退链，避免多份拷贝脱节。"""
+"""插件数据目录解析。
+
+统一使用官方 StarTools.get_data_dir()，所有持久化产物
+（审计日志、agent_projects 等）都落在 data/plugin_data/astrbot_orchestrator_v5/。
+"""
 
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
+import tempfile
 
-import logging
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
+PLUGIN_NAME = "astrbot_orchestrator_v5"
+
+
+def get_plugin_data_dir() -> Path:
+    """返回本插件的数据目录（data/plugin_data/astrbot_orchestrator_v5）。"""
+
+    from astrbot.api.star import StarTools
+
+    return StarTools.get_data_dir(PLUGIN_NAME)
 
 
 def resolve_projects_dir(
     prefer_dir: str | None = None,
     plugin_root: Path | None = None,
 ) -> str:
-    """按统一优先级解析 Agent 项目持久化目录。
+    """解析 Agent 项目持久化目录。
 
     Args:
         prefer_dir: 最高优先级的已有目录（如 ``artifact_service.persist_dir``）。
-        plugin_root: 插件包根目录，用于最后回退 ``<plugin_root>/projects``。
+        plugin_root: 兼容旧签名，已不参与解析。
 
     Returns:
         可用的项目目录绝对路径（必要时自动创建）。
@@ -33,37 +44,13 @@ def resolve_projects_dir(
         except OSError:
             logger.debug("优先目录不可写，回退: %s", prefer_dir)
 
-    env_root = os.environ.get("ASTRBOT_DATA_DIR") or os.environ.get("ASTRBOT_ROOT")
-    if env_root:
-        path = os.path.join(env_root, "agent_projects")
-        try:
-            os.makedirs(path, exist_ok=True)
-            return path
-        except OSError:
-            logger.debug("环境变量目录不可写，回退: %s", path)
-
-    cwd_path = Path.cwd() / "data" / "agent_projects"
     try:
-        os.makedirs(cwd_path, exist_ok=True)
-        return str(cwd_path)
-    except OSError:
-        logger.debug("当前目录不可写，回退: %s", cwd_path)
-
-    docker_path = Path("/AstrBot/data/agent_projects")
-    try:
-        os.makedirs(docker_path, exist_ok=True)
-        return str(docker_path)
-    except OSError:
-        logger.debug("Docker 标准目录不可写，回退: %s", docker_path)
-
-    if plugin_root is not None:
-        plugin_path = plugin_root / "projects"
-        try:
-            os.makedirs(plugin_path, exist_ok=True)
-            return str(plugin_path)
-        except OSError:
-            logger.debug("插件目录不可写，回退: %s", plugin_path)
+        path = get_plugin_data_dir() / "agent_projects"
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)
+    except Exception:
+        logger.debug("插件数据目录不可用，回退临时目录", exc_info=True)
 
     fallback = tempfile.mkdtemp(prefix="astrbot_orchestrator_projects_")
-    logger.warning("所有标准位置都不可写，使用临时目录: %s", fallback)
+    logger.warning("插件数据目录不可写，使用临时目录: %s", fallback)
     return fallback

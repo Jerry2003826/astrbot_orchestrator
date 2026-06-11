@@ -11,7 +11,6 @@ LocalSandbox - 本地代码执行实现
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 from pathlib import Path
 import re
@@ -19,11 +18,11 @@ import shlex
 import tempfile
 import typing as t
 
+from astrbot.api import logger
+
 from ..shared import UnsafePathError, resolve_path_within_base
 from .base import CodeSandbox
 from .types import ExecChunk, ExecResult, SandboxFile
-
-logger = logging.getLogger(__name__)
 
 # 默认 cwd：优先使用 ``/workspace``，若当前进程无权限则退到用户级别的
 # 用户数据目录，避免代码生成器在非 root 运行时直接崩溃。

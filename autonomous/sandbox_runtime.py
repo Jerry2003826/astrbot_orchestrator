@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import hashlib
-import logging
 from typing import Any, Callable
 
-from ..sandbox import CodeSandbox, create_sandbox, is_inside_shipyard_sandbox
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
+from ..sandbox import CodeSandbox, create_sandbox, is_inside_shipyard_sandbox
 
 _NETWORK_ERROR_KEYWORDS: tuple[str, ...] = (
     "name or service not known",
@@ -58,12 +57,14 @@ class SandboxRuntime:
 
         try:
             astrbot_config = self.context.get_config()
-            computer_use = astrbot_config.get("computer_use", {})
-            run_mode = computer_use.get("run_mode", "sandbox")
+            provider_settings = astrbot_config.get("provider_settings", {})
+            runtime = provider_settings.get("computer_use_runtime", "local")
         except Exception:
             return "auto"
 
-        if run_mode in {"none", "local"}:
+        # 与宿主 computer_client.get_booter 的语义一致：
+        # local/none -> 本地执行；其余值 -> 沙盒
+        if runtime in {"none", "local"}:
             return "local"
         return "shipyard"
 

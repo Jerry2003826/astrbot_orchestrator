@@ -9,13 +9,14 @@ from .path_safety import (
     sanitize_relative_path,
     slugify_identifier,
 )
-from .path_utils import resolve_projects_dir
+from .path_utils import get_plugin_data_dir, resolve_projects_dir
 
 __all__ = [
     "SafeConditionError",
     "UnsafePathError",
     "ensure_within_base",
     "evaluate_condition",
+    "get_plugin_data_dir",
     "quote_shell_path",
     "resolve_path_within_base",
     "resolve_projects_dir",

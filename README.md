@@ -1,245 +1,137 @@
 # AstrBot Orchestrator V5
 
-`astrbot_orchestrator_v5` 是一个运行在 `AstrBot` 宿主中的聊天驱动智能体编排插件。  
-它把自然语言任务处理、多 `SubAgent` 协作、插件/Skill/MCP 管理、代码执行、工作流和产物持久化统一到一套可测试、可审计、可扩展的运行时中。
+`astrbot_orchestrator_v5` 是一个运行在 `AstrBot >= 4.25` 宿主中的聊天驱动智能体编排插件。
 
-这个项目的核心价值，不是再造一个独立 Agent 框架，而是在 `AstrBot` 的命令与上下文体系内，提供一层更接近 `LangGraph` 风格的编排内核：显式请求上下文、清晰的运行时装配、可控的副作用边界，以及对复杂任务的多代理分解能力。
+它不再自研 Agent 框架，而是完全构建在 AstrBot 官方 Agent 体系之上：`/agent` 命令由官方 `tool_loop_agent` 驱动，插件/Skill/MCP 管理、沙盒代码执行、自我调试和 YAML 工作流全部封装为官方 `FunctionTool` 注册给宿主，子代理对接官方 `SubAgentOrchestrator`（HandoffTool）。默认聊天 Agent 和 `/agent` 命令共享同一套工具。
+
+## 版本要求
+
+- AstrBot `>= 4.25, < 5`
+- Python `>= 3.10`
 
 ## 质量快照
 
-以下为当前仓库的本地验证结果：
-
-- `435` 个单元测试通过
-- `tests/unit` 总覆盖率 `99%`
-- `ruff`、`mypy`、`bandit` 持续通过
-- 入口层、编排层、运行时、工作流、动态代理、MCP bridge 等关键模块已大面积达到 `100%` 覆盖
-
-## 目录
-
-- [核心能力](#核心能力)
-- [适用场景](#适用场景)
-- [系统总览](#系统总览)
-- [命令入口](#命令入口)
-- [工作流能力](#工作流能力)
-- [配置要点](#配置要点)
-- [项目结构](#项目结构)
-- [开发与验证](#开发与验证)
-- [文档索引](#文档索引)
-- [安全边界](#安全边界)
+- `379+` 个单元测试通过（Linux 全绿；Windows 本机存在少量依赖 WSL/POSIX 语义的沙盒测试噪音）
+- `ruff`（全量）、`mypy`、`bandit` 通过
+- 测试不依赖真实宿主：`_astrbot_stub/` 按 AstrBot v4.25.5 tag 源码对齐了全部所需 API 签名
 
 ## 核心能力
 
-- `聊天即入口`：以 `/agent` 为核心命令，也支持 `/plugin`、`/skill`、`/mcp`、`/exec`、`/debug`、`/sandbox` 等专用入口。
-- `多 SubAgent 编排`：复杂任务可拆分为多个动态代理协作执行，并由元编排器负责计划、协调与结果汇总。
-- `运行时原语清晰`：项目已经引入 `RequestContext`、`RuntimeContainer`、`Prompt -> Model -> Parser` 管道和显式图状态等核心原语。
-- `副作用能力适配`：插件安装、Skill 创建、MCP 配置、调试与执行器都被封装为独立能力模块，便于审计与测试。
-- `执行环境抽象`：统一接入本地执行与 `Shipyard` 沙盒执行，支持模式选择、健康检查、自动修复与受控回退。
-- `工作流引擎`：支持基于 YAML 的声明式工作流，适合稳定流程、模板化流程和多节点控制流。
-- `产物持久化边界明确`：代码提取、工作区写入、导出与持久化由 `ArtifactService` 统一处理，不与核心编排链路混杂。
-- `工程质量优先`：当前仓库已经建立 `pytest` + `coverage` + `ruff` + `mypy` + `bandit` 的质量门禁。
-
-## 适用场景
-
-- 在 `AstrBot` 中提供一站式的聊天驱动自动化能力
-- 将复杂用户请求拆分为多 `SubAgent` 协作任务
-- 在聊天中完成插件、Skill、MCP 的运营和运维动作
-- 受控地执行代码、生成文件并回传 artifact
-- 通过声明式工作流把固定流程沉淀为可复用模板
-- 为求职、演示或内部平台构建一套高质量的 Agent 编排样板
+- `官方 Agent 驱动`：`/agent <任务>` = `context.tool_loop_agent` + 本插件注册的 FunctionTool + 宿主既有工具，进度经 `event.send()` 推送。
+- `能力即工具`：以下能力以官方 `FunctionTool` 形式注册，默认聊天里 LLM 可直接调用（高危工具内置管理员门控）：
+  - `plugin_search / plugin_list / plugin_install / plugin_uninstall / plugin_update`
+  - `skill_list / skill_read / skill_create / skill_delete`
+  - `mcp_list / mcp_add / mcp_remove / mcp_test / mcp_list_tools`
+  - `sandbox_exec_python / sandbox_exec_bash / sandbox_file_read / sandbox_file_write / sandbox_install_packages`
+  - `debug_status / debug_recent_errors`
+  - `workflow_list / workflow_run`
+- `官方子代理`：预设代理模板（research/code/test/debug 等）写入宿主 `subagent_orchestrator` 配置并热加载，由官方 HandoffTool 路由。
+- `沙盒执行栈`：本地 / Shipyard 双运行时，模式跟随宿主 `provider_settings.computer_use_runtime`，含健康检查与受控回退。
+- `产物持久化`：`ArtifactService` 统一处理代码提取、工作区写入与导出。
+- `工作流引擎`：YAML 声明式工作流（start/agent/skill/mcp/condition/parallel/end）。
+- `审计与限流`：命令层统一安全审计日志与触发频率限制。
 
 ## 系统总览
 
-### 主架构图
-
 ```mermaid
-flowchart LR
-    User[用户 / AstrBot 会话] --> Host[AstrBot Host]
-    Host --> Commands["/agent /plugin /skill /mcp /exec /debug /sandbox"]
-    Commands --> Plugin[OrchestratorPlugin]
-    Plugin --> Entry[CommandHandlers]
-    Entry --> Runtime[RuntimeContainer]
-    Runtime --> Request[RequestContext]
-    Runtime --> Orchestrator[DynamicOrchestrator]
-    Runtime --> Workflow[WorkflowEngine]
-
-    Orchestrator --> Meta[MetaOrchestrator]
-    Meta --> Analyzer[TaskAnalyzer]
-    Meta --> Agents[DynamicAgentManager + AgentCoordinator]
-
-    Agents --> Tools[Plugin / Skill / MCP / Debug / Executor Tools]
-    Tools --> Exec[ExecutionManager]
-    Exec --> Sandbox[LocalSandbox / ShipyardSandbox]
-    Agents --> Artifact[ArtifactService]
-
-    Workflow --> Tools
+flowchart TB
+    Chat[普通聊天] --> DefaultAgent[AstrBot 默认 Agent]
+    Cmd["/agent 指令"] --> Runner["AgentRunner(薄层)"]
+    Runner --> TLA["context.tool_loop_agent"]
+    DefaultAgent --> Tools["本插件注册的 FunctionTools"]
+    TLA --> Tools
+    DefaultAgent --> Handoff["官方 HandoffTool 子代理"]
+    Tools --> Caps["autonomous/* 能力实现"]
+    Caps --> Sandbox["sandbox/* 执行栈"]
+    Caps --> Artifact["ArtifactService"]
+    Tools --> WF["WorkflowEngine YAML"]
 ```
 
-### 请求流转图
+要点：
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant P as OrchestratorPlugin
-    participant H as CommandHandlers
-    participant R as RequestContext
-    participant O as DynamicOrchestrator
-    participant M as MetaOrchestrator
-    participant A as AgentCoordinator
-    participant E as ExecutionManager
-    participant S as SandboxRuntime
-    participant F as ArtifactService
-
-    U->>P: /agent <任务描述>
-    P->>H: 进入命令处理层
-    H->>R: 构建请求上下文
-    H->>O: 进入主编排链路
-    O->>M: 复杂任务升级
-    M->>A: 协调 SubAgent 计划
-    A->>E: 调用执行与工具能力
-    E->>S: 选择本地或沙盒运行时
-    A->>F: 提取并持久化产物
-    F-->>U: 返回结果摘要 / 文件信息
-```
-
-如果你想看更完整的组件关系、执行边界和扩展能力图，见 [docs/architecture.md](docs/architecture.md)。
+- 插件不再有自研规划循环 / 元编排器 / 任务分析器，编排完全交给宿主官方 Agent。
+- `/agent` 与默认聊天的差异只是入口与系统提示词，两者使用同一套工具。
 
 ## 命令入口
 
-| 命令 | 作用 | 常见用法 |
+| 命令 | 作用 | 权限 |
 | --- | --- | --- |
-| `/agent` | 综合任务入口，适合自然语言请求、多步骤任务和自动编排 | `/agent 帮我分析这个需求并生成实现方案` |
-| `/plugin` | 插件市场搜索、安装、卸载、更新与代理查看，安装/卸载/更新需管理员 | `/plugin search 翻译` |
-| `/skill` | Skill 列表、创建、编辑、删除、读取，列表/删除/读取需管理员 | `/skill read weather_query` |
-| `/mcp` | MCP 服务注册、删除、测试与工具查看，仅管理员可用 | `/mcp test search` |
-| `/exec` | 使用统一执行器执行命令或代码，仅管理员可用 | `/exec python print('hello')` |
-| `/debug` | 查看状态、日志与问题分析结果，仅管理员可用 | `/debug status` |
-| `/sandbox` | 直接使用底层沙盒接口进行执行、文件与包管理，仅管理员可用 | `/sandbox files /workspace` |
+| `/agent <任务>` | 官方 tool_loop_agent 驱动的综合任务入口 | 所有人（受限流） |
+| `/agent status` | 查看官方子代理（handoffs）当前状态 | 所有人 |
+| `/agent templates` | 查看预设子代理模板 | 所有人 |
+| `/agent sync` | 将模板同步到宿主 subagent 配置并热加载 | 管理员 |
+| `/plugin search/list/install/uninstall/update` | 插件市场运维 | 写操作仅管理员 |
+| `/skill list/read/create/delete` | Skill 管理 | 管理员 |
+| `/mcp list/add/remove/test/tools` | MCP 服务器管理 | 管理员 |
+| `/exec <code>` | 统一执行器执行代码 | 管理员 |
+| `/sandbox exec/files/read/install` | 底层沙盒接口 | 管理员 |
+| `/debug status/errors` | 系统状态与最近错误 | 管理员 |
 
-完整命令说明见 [docs/commands.md](docs/commands.md)。
-
-## 工作流能力
-
-项目内置 YAML 工作流引擎，适合把稳定流程沉淀成可复用模板。当前支持的节点类型包括：
-
-- `start`
-- `agent`
-- `skill`
-- `mcp`
-- `condition`
-- `parallel`
-- `end`
-
-仓库中已经包含三个可直接参考的样例：
-
-- [workflows/example_simple.yaml](workflows/example_simple.yaml)
-- [workflows/example_research.yaml](workflows/example_research.yaml)
-- [workflows/example_analysis.yaml](workflows/example_analysis.yaml)
-
-这些样例分别展示了：
-
-- 单轮问答流程
-- 多阶段研究与报告生成
-- 带条件分支的数据分析工作流
+命令权限由官方 `@filter.permission_type(ADMIN)` 装饰器控制；FunctionTool 的高危操作在工具内部用 `event.is_admin()` 二次门控（非管理员触发时 LLM 收到拒绝文案）。
 
 ## 配置要点
 
-配置项由 [_conf_schema.json](_conf_schema.json) 定义，最重要的配置可以分成四组：
+配置项由 [_conf_schema.json](_conf_schema.json) 定义：
 
-- `LLM 与编排`
-  `llm_provider`、`max_iterations`、`max_parallel_tasks`、`task_timeout`
-- `动态 SubAgent`
-  `enable_dynamic_agents`、`max_concurrent_agents`、`agent_timeout`、`force_subagents_for_complex_tasks`
-- `副作用能力开关`
-  `enable_plugin_management`、`enable_skill_creation`、`enable_mcp_config`、`enable_code_execution`
-- `执行与安全`
-  `auto_fix_sandbox`、`allow_local_fallback`
-
-一个常见的安全起点如下：
-
-```json
-{
-  "llm_provider": "your_provider_id",
-  "enable_dynamic_agents": true,
-  "force_subagents_for_complex_tasks": true,
-  "enable_code_execution": true,
-  "auto_fix_sandbox": true,
-  "allow_local_fallback": false
-}
-```
-
-更完整的配置说明、模板覆盖示例和推荐实践见 [docs/configuration.md](docs/configuration.md)。
+- `LLM 与编排`：`llm_provider`（留空则跟随会话 provider）、`max_iterations`、`task_timeout`
+- `子代理`：`enable_dynamic_agents`（启动时是否同步模板到宿主 subagent 配置）
+- `能力开关`（控制对应 FunctionTool 组是否注册）：
+  `enable_plugin_management`、`enable_skill_creation`、`enable_mcp_config`、`enable_code_execution`、`enable_self_debug`、`enable_workflows`
+- `执行与安全`：`auto_fix_sandbox`、`allow_local_fallback`
 
 ## 项目结构
 
 | 路径 | 说明 |
 | --- | --- |
-| `main.py` | AstrBot 插件注册、命令入口、生命周期管理 |
-| `entrypoints/` | 命令处理层，把 AstrBot 事件转换成统一请求 |
-| `runtime/` | `RequestContext`、运行时容器、Prompt 管道、图状态等原语 |
-| `orchestrator/` | 主编排器、任务分析、SubAgent 协调、代码提取、MCP/Skill 适配 |
-| `autonomous/` | 插件、Skill、MCP、执行器、调试等副作用能力 |
+| `main.py` | 插件注册、命令组定义、初始化（注册工具 + 同步子代理） |
+| `tools/` | 官方 FunctionTool 封装（插件/Skill/MCP/沙盒/调试/工作流） |
+| `entrypoints/` | 命令处理层：限流、审计、参数校验 |
+| `runtime/` | `RuntimeContainer` 装配、`RequestContext`、执行策略 |
+| `orchestrator/` | `AgentRunner`（tool_loop_agent 薄层）、子代理配置适配器、MCP/Skill 适配、代码提取 |
+| `autonomous/` | 插件、Skill、MCP、执行器、调试等能力实现 |
 | `sandbox/` | 本地与 Shipyard 执行环境抽象 |
-| `artifacts/` | 代码提取、工作区写入与 artifact 落盘边界 |
-| `workflow/` | 工作流引擎与节点模型 |
-| `workflows/` | YAML 工作流样例 |
-| `shared/` | 安全条件求值、路径安全等通用能力 |
-| `tests/unit/` | 以模块镜像为主的单元测试集合 |
+| `artifacts/` | 产物提取与落盘边界 |
+| `workflow/` + `workflows/` | 工作流引擎与 YAML 样例 |
+| `shared/` | 条件求值、路径安全等通用能力 |
+| `_astrbot_stub/` | 按 v4.25.5 对齐的宿主 API 测试桩（仅测试用，不随插件加载） |
+| `tests/unit/` | 单元测试 |
+
+## 与宿主的耦合点
+
+- 公开 API：`context.tool_loop_agent`、`context.add_llm_tools`、`context.get_config`、`context.get_llm_tool_manager`、`context.get_all_stars`、`context.get_all_providers`、`StarTools.get_data_dir()`、`astrbot.api.logger`。
+- **唯一内部依赖**：插件安装/卸载/更新使用 `context._star_manager`（AstrBot 无公开插件管理 API）。该访问点集中在 `autonomous/plugin_manager.py`，若宿主升级导致接口变动只需修改一处。
 
 ## 开发与验证
 
-### 前置条件
-
-- Python `>= 3.10`
-- 可用的 `AstrBot` 宿主运行环境
-- 至少一个已配置的 LLM provider
-- 如果需要沙盒执行，建议准备好 `Shipyard` 运行环境
-
-### 安装开发环境
-
 ```bash
-cd "/path/to/astrbot_orchestrator_v5"
-uv venv
-source .venv/bin/activate
+cd astrbot_orchestrator_v5
+uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
-```
 
-### 常用验证命令
-
-```bash
 uv run pytest tests/unit
-uv run ruff check .
-uv run mypy --follow-imports=skip --ignore-missing-imports main.py shared/conditions.py runtime/request_context.py
-uv run bandit -q main.py autonomous orchestrator shared runtime sandbox workflow artifacts entrypoints
+uv run ruff format --check . && uv run ruff check .
+uv run mypy --follow-imports=skip shared/conditions.py shared/path_safety.py \
+  runtime/request_context.py runtime/container.py entrypoints/command_handlers.py \
+  artifacts/service.py orchestrator/agent_runner.py orchestrator/dynamic_agent_manager.py tools
+uv run bandit -q -r artifacts entrypoints runtime shared sandbox tools workflow
 ```
 
 说明：
 
-- `AstrBot` 本身由宿主提供，因此不会作为普通运行时依赖直接声明到包安装链路中。
-- 本项目在 `pyproject.toml` 中直接声明的核心依赖主要是 `aiohttp` 与 `PyYAML`。
+- `AstrBot` 由宿主提供，不声明为安装依赖；测试经 `tests/conftest.py` 注入 `_astrbot_stub`。
+- 直接声明的运行依赖仅 `aiohttp` 与 `PyYAML`。
 
 ## 文档索引
 
-- [docs/architecture.md](docs/architecture.md)：完整架构说明与关系图
-- [docs/commands.md](docs/commands.md)：命令入口与常见用法
-- [docs/configuration.md](docs/configuration.md)：配置项分组与示例
+- [docs/architecture.md](docs/architecture.md)：架构说明
+- [docs/commands.md](docs/commands.md)：命令说明
+- [docs/configuration.md](docs/configuration.md)：配置说明
 - [SECURITY.md](SECURITY.md)：安全原则与风险边界
 
 ## 安全边界
 
-本项目默认把高风险路径收敛到明确边界内：
-
-- 默认拒绝不安全条件表达式
-- 默认拒绝路径穿越和危险文件名
-- 默认拒绝非管理员触发的高风险副作用
-- 默认拒绝不安全的 MCP 地址
-- 默认关闭自动回退到本地执行
-
-高风险能力主要包括：
-
-- 代码执行
-- 文件写入与持久化
-- Skill 创建
-- MCP 配置
-- 插件安装与更新
-
-这些动作必须由服务端权限策略与安全边界共同控制，不能信任模型输出本身。
+- 默认拒绝不安全条件表达式、路径穿越与危险文件名
+- 高危 FunctionTool（安装/写文件/执行代码等）要求触发者为 AstrBot 管理员
+- MCP 服务器地址仅允许公网 HTTPS，敏感请求头强制环境变量引用
+- 沙盒本地回退默认关闭（`allow_local_fallback: false`）
+- 命令层统一审计日志与限流

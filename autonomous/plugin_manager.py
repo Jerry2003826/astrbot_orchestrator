@@ -7,12 +7,10 @@
 - 查看已安装插件
 """
 
-import logging
 from typing import Any, cast
 
 import aiohttp
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 # AstrBot 插件市场 API
 PLUGIN_REGISTRY_URL = "https://api.soulter.top/stars"
@@ -44,17 +42,18 @@ class PluginManagerTool:
         self._cache_valid = False
 
     def _get_plugin_manager(self) -> Any | None:
-        """获取 AstrBot 的 PluginManager"""
-        try:
-            return self.context._star_manager
-        except AttributeError:
-            return None
+        """获取 AstrBot 的 PluginManager。
+
+        注意：4.25.5 没有公开的插件安装 API，``context._star_manager``
+        是唯一途径（与 AstrBot 内部实现耦合）。本方法是全插件中
+        访问该内部属性的唯一适配点，宿主升级时只需检查这里。
+        """
+        return getattr(self.context, "_star_manager", None)
 
     def _get_github_proxy(self) -> str:
-        """从 AstrBot 配置获取 GitHub 代理"""
+        """从 AstrBot 全局配置获取 GitHub 代理"""
         try:
-            config = self.context._config
-            # AstrBot 配置中的 GitHub 加速设置
+            config = self.context.get_config()
             proxy = config.get("plugin_settings", {}).get("github_proxy", "")
             return cast(str, proxy)
         except Exception:

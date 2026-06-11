@@ -12,7 +12,6 @@
 - 健康检查和自动修复
 """
 
-import logging
 import typing as t
 from typing import Any, Dict, List
 
@@ -25,8 +24,6 @@ from ..sandbox import (
 from .execution_facades import ExecutionAccessPolicy, LegacyExecutionFacade, SandboxApiClient
 from .execution_support import ExecutionCommandPolicy, ExecutionFormatter
 from .sandbox_runtime import SandboxRuntime
-
-logger = logging.getLogger(__name__)
 
 
 class ExecutionManager:

@@ -12,15 +12,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import logging
 import shlex
 import typing as t
+
+from astrbot.api import logger
 
 from ..shared import quote_shell_path, resolve_path_within_base
 from .base import CodeSandbox
 from .types import ExecChunk, ExecResult, SandboxFile
-
-logger = logging.getLogger(__name__)
 
 
 class ShipyardSandbox(CodeSandbox):

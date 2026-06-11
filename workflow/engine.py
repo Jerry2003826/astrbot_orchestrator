@@ -5,16 +5,15 @@
 """
 
 import asyncio
-import logging
 from pathlib import Path
 from typing import Any, cast
 
+from astrbot.api import logger
 import yaml
 
 from ..shared import SafeConditionError, evaluate_condition
 from .nodes import NodeStatus, NodeType, WorkflowDefinition, WorkflowNode, WorkflowState
 
-logger = logging.getLogger(__name__)
 NodeExecutionResult = dict[str, Any] | bool
 
 

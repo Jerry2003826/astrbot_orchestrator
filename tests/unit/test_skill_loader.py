@@ -1,289 +1,118 @@
-"""AstrBotSkillLoader 单元测试。"""
+"""AstrBotSkillLoader（官方 SkillManager 单一路径）测试。"""
 
 from __future__ import annotations
 
-import builtins
-import logging
 from pathlib import Path
-import sys
-from types import ModuleType, SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from astrbot_orchestrator_v5.orchestrator.skill_loader import AstrBotSkillLoader
 
-if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
-
-    _PYTEST_TYPE_IMPORTS = (
-        CaptureFixture,
-        FixtureRequest,
-        LogCaptureFixture,
-        MonkeyPatch,
-        MockerFixture,
-    )
-
 
 class FakeSkillManager:
-    """SkillManager 替身。"""
-
-    def __init__(
-        self,
-        infos: list[SimpleNamespace] | None = None,
-        error: Exception | None = None,
-    ) -> None:
-        """初始化技能列表与异常行为。"""
-
+    def __init__(self, infos: list[Any] | None = None, error: Exception | None = None) -> None:
         self.infos = infos or []
         self.error = error
         self.calls: list[bool] = []
 
-    def list_skills(self, active_only: bool = True) -> list[SimpleNamespace]:
-        """返回模拟技能列表。"""
-
-        self.calls.append(active_only)
+    def list_skills(self, active_only: bool = False) -> list[Any]:
         if self.error is not None:
             raise self.error
-        if active_only:
-            return [info for info in self.infos if info.active]
+        self.calls.append(active_only)
         return list(self.infos)
 
 
-class FakeSkillInfo:
-    """Prompt 构建时使用的 SkillInfo 替身。"""
-
-    def __init__(self, name: str, description: str, path: str, active: bool) -> None:
-        """保存技能信息。"""
-
-        self.name = name
-        self.description = description
-        self.path = path
-        self.active = active
+def make_loader(manager: Any) -> AstrBotSkillLoader:
+    loader = AstrBotSkillLoader(context=SimpleNamespace())
+    loader._skill_manager = manager
+    return loader
 
 
-def install_fake_skill_modules(
-    monkeypatch: pytest.MonkeyPatch,
-    skill_manager_class: type[FakeSkillManager],
-) -> None:
-    """安装伪造的 astrbot skill 模块。"""
-
-    astrbot_module = ModuleType("astrbot")
-    core_module = ModuleType("astrbot.core")
-    skills_module = ModuleType("astrbot.core.skills")
-    skill_manager_module = ModuleType("astrbot.core.skills.skill_manager")
-
-    def build_skills_prompt(skill_infos: list[FakeSkillInfo]) -> str:
-        """构建测试用 prompt。"""
-
-        names = ",".join(info.name for info in skill_infos)
-        return f"PROMPT:{names}"
-
-    skills_module.SkillManager = skill_manager_class
-    skill_manager_module.SkillInfo = FakeSkillInfo
-    skill_manager_module.build_skills_prompt = build_skills_prompt
-    astrbot_module.core = core_module
-    core_module.skills = skills_module
-
-    monkeypatch.setitem(sys.modules, "astrbot", astrbot_module)
-    monkeypatch.setitem(sys.modules, "astrbot.core", core_module)
-    monkeypatch.setitem(sys.modules, "astrbot.core.skills", skills_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "astrbot.core.skills.skill_manager",
-        skill_manager_module,
+def make_info(name: str, active: bool = True, path: str = "") -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name,
+        description=f"desc-{name}",
+        path=path or f"/skills/{name}",
+        active=active,
     )
 
 
-def test_skill_loader_get_skill_manager_caches_success_and_logs_import_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """SkillManager 应支持成功缓存与导入失败告警。"""
+def test_list_skills_converts_official_infos() -> None:
+    manager = FakeSkillManager([make_info("s1"), make_info("s2", active=False)])
+    loader = make_loader(manager)
 
-    install_fake_skill_modules(monkeypatch, FakeSkillManager)
-    loader = AstrBotSkillLoader(context=object())
+    skills = loader.list_skills(active_only=False)
 
-    first_manager = loader._get_skill_manager()
-    second_manager = loader._get_skill_manager()
+    assert [s["name"] for s in skills] == ["s1", "s2"]
+    assert skills[0]["type"] == "astrbot_skill"
+    assert manager.calls == [False]
 
-    assert isinstance(first_manager, FakeSkillManager)
-    assert second_manager is first_manager
-
-    original_import = builtins.__import__
-
-    def fake_import(
-        name: str,
-        globals_dict: dict[str, Any] | None = None,
-        locals_dict: dict[str, Any] | None = None,
-        fromlist: tuple[str, ...] = (),
-        level: int = 0,
-    ) -> Any:
-        """拦截 astrbot.core.skills 导入失败场景。"""
-
-        if name == "astrbot.core.skills":
-            raise ImportError("boom")
-        return original_import(name, globals_dict, locals_dict, fromlist, level)
-
-    caplog.set_level(logging.WARNING)
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    failing_loader = AstrBotSkillLoader(context=object())
-
-    assert failing_loader._get_skill_manager() is None
-    assert failing_loader.list_skills() == []
-    assert "无法导入 SkillManager" in caplog.text
+    loader.list_skills(active_only=True)
+    assert manager.calls == [False, True]
 
 
-def test_skill_loader_list_get_and_invalidate_cache_cover_success_and_error_paths(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """技能列表应覆盖缓存、过滤、查询、失效与异常路径。"""
+def test_list_skills_handles_manager_errors() -> None:
+    loader = make_loader(FakeSkillManager(error=RuntimeError("boom")))
 
-    infos = [
-        SimpleNamespace(
-            name="alpha",
-            description="active skill",
-            path="/tmp/alpha",
-            active=True,
-        ),
-        SimpleNamespace(
-            name="beta",
-            description="inactive skill",
-            path="/tmp/beta",
-            active=False,
-        ),
-    ]
-    skill_manager = FakeSkillManager(infos=infos)
-    loader = AstrBotSkillLoader(context=object())
-    monkeypatch.setattr(loader, "_get_skill_manager", lambda: skill_manager)
+    assert loader.list_skills() == []
 
-    all_skills = loader.list_skills(active_only=False)
-    active_skills = loader.list_skills(active_only=True)
 
-    assert skill_manager.calls == [False]
-    assert [skill["name"] for skill in all_skills] == ["alpha", "beta"]
-    assert [skill["name"] for skill in active_skills] == ["alpha"]
-    assert loader.get_skill("beta") == {
-        "name": "beta",
-        "description": "inactive skill",
-        "path": "/tmp/beta",
-        "active": False,
-        "type": "astrbot_skill",
-    }
+def test_list_skills_handles_missing_manager() -> None:
+    loader = AstrBotSkillLoader(context=SimpleNamespace())
+    loader._get_skill_manager = lambda: None  # type: ignore[method-assign]
+
+    assert loader.list_skills() == []
+
+
+def test_get_skill_finds_by_name() -> None:
+    loader = make_loader(FakeSkillManager([make_info("s1")]))
+
+    assert loader.get_skill("s1")["description"] == "desc-s1"
     assert loader.get_skill("missing") is None
 
-    loader.invalidate_cache()
-    loader.list_skills(active_only=True)
-    assert skill_manager.calls == [False, True]
 
-    caplog.set_level(logging.ERROR)
-    error_loader = AstrBotSkillLoader(context=object())
-    error_manager = FakeSkillManager(error=RuntimeError("broken"))
-    monkeypatch.setattr(error_loader, "_get_skill_manager", lambda: error_manager)
+def test_get_skill_content_reads_skill_md(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "s1"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# hello", encoding="utf-8")
 
-    assert error_loader.list_skills() == []
-    assert "读取 Skills 失败: broken" in caplog.text
+    loader = make_loader(FakeSkillManager([make_info("s1", path=str(skill_dir))]))
 
-
-def test_skill_loader_get_skill_content_supports_uppercase_lowercase_missing_and_read_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """读取 Skill 内容时应覆盖大小写文件名、缺失与读取失败。"""
-
-    upper_dir = tmp_path / "upper"
-    upper_dir.mkdir()
-    upper_file = upper_dir / "SKILL.md"
-    upper_file.write_text("UPPER", encoding="utf-8")
-
-    lower_dir = tmp_path / "lower"
-    lower_dir.mkdir()
-    (lower_dir / "skill.md").write_text("LOWER", encoding="utf-8")
-
-    missing_dir = tmp_path / "missing"
-    missing_dir.mkdir()
-
-    broken_dir = tmp_path / "broken"
-    broken_dir.mkdir()
-    broken_file = broken_dir / "SKILL.md"
-    broken_file.write_text("BROKEN", encoding="utf-8")
-
-    skill_paths = {
-        "upper": {"path": str(upper_dir)},
-        "lower": {"path": str(lower_dir)},
-        "missing": {"path": str(missing_dir)},
-        "broken": {"path": str(broken_dir)},
-    }
-    loader = AstrBotSkillLoader(context=object())
-    monkeypatch.setattr(loader, "get_skill", lambda name: skill_paths.get(name))
-
-    assert loader.get_skill_content("upper") == "UPPER"
-    assert loader.get_skill_content("lower") == "LOWER"
+    assert loader.get_skill_content("s1") == "# hello"
     assert loader.get_skill_content("missing") is None
-    assert loader.get_skill_content("unknown") is None
-
-    original_read_text = Path.read_text
-
-    def fake_read_text(self: Path, encoding: str = "utf-8") -> str:
-        """针对特定文件模拟读取失败。"""
-
-        if self == broken_file:
-            raise OSError("cannot read")
-        return original_read_text(self, encoding=encoding)
-
-    caplog.set_level(logging.ERROR)
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
-
-    assert loader.get_skill_content("broken") is None
-    assert "读取 SKILL.md 失败: cannot read" in caplog.text
 
 
-def test_skill_loader_build_skills_prompt_covers_empty_native_and_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """技能提示词应覆盖空列表、原生构建与备用实现。"""
+def test_get_skill_content_falls_back_to_lowercase(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "s1"
+    skill_dir.mkdir()
+    (skill_dir / "skill.md").write_text("# lower", encoding="utf-8")
 
-    install_fake_skill_modules(monkeypatch, FakeSkillManager)
-    loader = AstrBotSkillLoader(context=object())
+    loader = make_loader(FakeSkillManager([make_info("s1", path=str(skill_dir))]))
 
-    monkeypatch.setattr(loader, "list_skills", lambda active_only=True: [])
+    assert loader.get_skill_content("s1") == "# lower"
+
+
+def test_build_skills_prompt_uses_official_builder_when_available() -> None:
+    infos = [make_info("s1")]
+    loader = make_loader(FakeSkillManager(infos))
+
+    prompt = loader.build_skills_prompt()
+
+    # stub 提供官方 build_skills_prompt 时输出官方格式，否则回退列表;
+    # 两种情况都必须包含技能名。
+    assert "s1" in prompt
+
+
+def test_build_skills_prompt_empty_when_no_skills() -> None:
+    loader = make_loader(FakeSkillManager([]))
+
     assert loader.build_skills_prompt() == ""
 
-    monkeypatch.setattr(
-        loader,
-        "list_skills",
-        lambda active_only=True: [
-            {
-                "name": "alpha",
-                "description": "first skill",
-                "path": "/tmp/alpha",
-                "active": True,
-            }
-        ],
-    )
-    assert loader.build_skills_prompt() == "PROMPT:alpha"
 
-    original_import = builtins.__import__
+@pytest.mark.parametrize("name", ["invalidate_cache"])
+def test_legacy_interface_kept(name: str) -> None:
+    loader = make_loader(FakeSkillManager([]))
 
-    def fake_import(
-        name: str,
-        globals_dict: dict[str, Any] | None = None,
-        locals_dict: dict[str, Any] | None = None,
-        fromlist: tuple[str, ...] = (),
-        level: int = 0,
-    ) -> Any:
-        """触发 prompt 构建器的 ImportError 备用分支。"""
-
-        if name == "astrbot.core.skills.skill_manager":
-            raise ImportError("no skill prompt builder")
-        return original_import(name, globals_dict, locals_dict, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    assert loader.build_skills_prompt() == "## 可用技能\n- **alpha**: first skill"
+    getattr(loader, name)()

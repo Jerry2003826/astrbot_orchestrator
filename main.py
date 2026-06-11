@@ -1,166 +1,84 @@
-"""
-AstrBot 全自主智能体编排器
+"""AstrBot 全自主智能体编排器（官方 Agent 体系版）。
 
-实现目标：所有操作都可以通过聊天完成
-- 搜索插件市场，自己安装插件
-- 自己写 Skill
-- 自己编写/配置 MCP
-- 出问题自己 debug
-- 选择 local 或 sandbox 执行
+- 默认聊天：通过 ``context.add_llm_tools`` 注册 FunctionTool，
+  由 AstrBot 默认 Agent 自然语言调用（无需自研路由）。
+- ``/agent``：AgentRunner 调 ``context.tool_loop_agent`` 执行多步任务。
+- 子代理：预设模板经 DynamicAgentManager 写入官方
+  ``subagent_orchestrator`` 配置，由官方 HandoffTool 体系执行。
 """
 
 from collections.abc import AsyncIterator
-import json
-import logging
 from typing import Any
 
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
+from astrbot.core.star.filter.command import GreedyStr
 
-from .autonomous.debugger import SelfDebugger
-from .autonomous.executor import ExecutionManager
-from .autonomous.mcp_configurator import MCPConfiguratorTool
-from .autonomous.plugin_manager import PluginManagerTool
-from .autonomous.skill_creator import SkillCreatorTool
 from .entrypoints import CommandHandlers
-from .orchestrator.agent_coordinator import AgentCoordinator
-from .orchestrator.capability_builder import AgentCapabilityBuilder
-from .orchestrator.core import DynamicOrchestrator
-from .orchestrator.dynamic_agent_manager import DynamicAgentManager
-from .orchestrator.mcp_bridge import MCPBridge
-from .orchestrator.meta_orchestrator import MetaOrchestrator
-from .orchestrator.skill_loader import AstrBotSkillLoader
-from .orchestrator.task_analyzer import TaskAnalyzer
 from .runtime.container import RuntimeContainer
-from .runtime.request_context import RequestContext
-from .workflow.engine import WorkflowEngine
 
-logger = logging.getLogger(__name__)
+ADMIN = filter.PermissionType.ADMIN
 
 
 @register(
-    name="astrbot_orchestrator",
-    desc="全自主智能体编排器 - 通过聊天完成所有操作（CodeSandbox 增强版）",
-    version="3.0.0",
+    name="astrbot_orchestrator_v5",
+    desc="全自主智能体编排器 - 基于官方 tool_loop_agent + FunctionTool + HandoffTool",
+    version="4.0.0",
     author="lijiarui",
 )
 class OrchestratorPlugin(Star):
-    """
-    AstrBot 全自主智能体编排器
-
-    核心能力：
-    - 🔍 搜索插件市场，自动安装插件
-    - ✍️ 动态创建/编辑 Skill
-    - 🔌 配置 MCP 服务器
-    - 🐛 自我诊断和 Debug
-    - 🖥️ 选择 local/sandbox 执行环境
-    """
+    """全自主智能体编排器插件入口。"""
 
     def __init__(
         self,
         context: Context,
         config: AstrBotConfig | None = None,
     ) -> None:
-        """初始化插件入口及其运行时占位属性。"""
-
         super().__init__(context)
-
-        self.config = config or AstrBotConfig()
-
-        # 核心组件
-        self.orchestrator: DynamicOrchestrator = None
-        self.meta_orchestrator: MetaOrchestrator = None
-        self.skill_loader: AstrBotSkillLoader = None
-        self.mcp_bridge: MCPBridge = None
-        self.workflow_engine: WorkflowEngine = None
-        self.dynamic_agent_manager: DynamicAgentManager = None
-        self.task_analyzer: TaskAnalyzer = None
-        self.agent_coordinator: AgentCoordinator = None
-        self.capability_builder: AgentCapabilityBuilder = None
-
-        # 自主能力组件
-        self.plugin_tool: PluginManagerTool = None
-        self.skill_tool: SkillCreatorTool = None
-        self.mcp_tool: MCPConfiguratorTool = None
-        self.debugger: SelfDebugger = None
-        self.executor: ExecutionManager = None
+        self.config = config if config is not None else AstrBotConfig()
         self.runtime: RuntimeContainer | None = None
         self.command_handlers: CommandHandlers | None = None
-
         self._initialized = False
 
-    def _bind_runtime_components(self, runtime: RuntimeContainer) -> None:
-        """将运行时容器中的组件显式绑定到插件实例，保留类型可追踪性。"""
-
-        attrs = runtime.export_attributes()
-
-        self.orchestrator = attrs.get("orchestrator")
-        self.meta_orchestrator = attrs.get("meta_orchestrator")
-        self.skill_loader = attrs.get("skill_loader")
-        self.mcp_bridge = attrs.get("mcp_bridge")
-        self.workflow_engine = attrs.get("workflow_engine")
-        self.dynamic_agent_manager = attrs.get("dynamic_agent_manager")
-        self.task_analyzer = attrs.get("task_analyzer")
-        self.agent_coordinator = attrs.get("agent_coordinator")
-        self.capability_builder = attrs.get("capability_builder")
-        self.plugin_tool = attrs.get("plugin_tool")
-        self.skill_tool = attrs.get("skill_tool")
-        self.mcp_tool = attrs.get("mcp_tool")
-        self.debugger = attrs.get("debugger")
-        self.executor = attrs.get("executor")
-
-    def _build_request_context(
-        self,
-        event: AstrMessageEvent,
-        user_request: str,
-        provider_id: str,
-        entrypoint: str,
-    ) -> RequestContext:
-        """为一次命令调用构建请求级运行时上下文。"""
-
-        return RequestContext.from_event(
-            user_request=user_request,
-            provider_id=provider_id,
-            event=event,
-            metadata={"entrypoint": entrypoint},
-        )
-
-    def _get_command_handlers(self) -> CommandHandlers:
-        """返回已初始化的命令处理器。"""
-
-        if self.command_handlers is None:
-            raise RuntimeError("命令处理器未初始化")
-        return self.command_handlers
-
     async def initialize(self) -> None:
-        """插件初始化"""
+        """装配运行时、注册 FunctionTool、同步子代理模板。"""
+
         if self._initialized:
             return
 
-        logger.info("初始化全自主智能体编排器...")
+        logger.info("初始化全自主智能体编排器 v4...")
         self.runtime = RuntimeContainer.build(self.context, self.config)
-        self._bind_runtime_components(self.runtime)
         self.command_handlers = CommandHandlers(
             context=self.context,
             runtime=self.runtime,
-            build_request_context=self._build_request_context,
         )
+
+        if self.runtime.tools:
+            self.context.add_llm_tools(*self.runtime.tools)
+            logger.info("已注册 %d 个 FunctionTool", len(self.runtime.tools))
+
+        if self._config_bool("enable_dynamic_agents", True):
+            manager = self.runtime.dynamic_agent_manager
+            if manager is not None:
+                try:
+                    result = await manager.sync_templates_to_host()
+                    logger.info("子代理模板同步: %s", result)
+                except Exception:
+                    logger.warning("子代理模板同步失败", exc_info=True)
 
         self._initialized = True
-
-        # 调试日志：检查配置
         logger.info("全自主智能体编排器初始化完成")
-        logger.info(
-            "配置检查: enable_dynamic_agents=%s, force_subagents=%s",
-            self.config.get("enable_dynamic_agents"),
-            self.config.get("force_subagents_for_complex_tasks"),
-        )
 
+    async def terminate(self) -> None:
+        """插件卸载时释放沙盒等资源。"""
+
+        if self.runtime is not None:
+            await self.runtime.astop()
+        self._initialized = False
+        logger.info("全自主智能体编排器已停止")
 
     def _config_bool(self, key: str, default: bool) -> bool:
-        """读取布尔配置，兼容 AstrBotConfig 缺省值。"""
-
         value = self.config.get(key)
         if value is None:
             return default
@@ -170,284 +88,377 @@ class OrchestratorPlugin(Star):
             return value.strip().lower() in {"1", "true", "yes", "on", "是", "开启"}
         return bool(value)
 
-    def _config_str(self, key: str, default: str) -> str:
-        """读取字符串配置，兼容 AstrBotConfig 缺省值。"""
+    def _handlers(self) -> CommandHandlers:
+        if self.command_handlers is None:
+            raise RuntimeError("命令处理器未初始化")
+        return self.command_handlers
 
-        value = self.config.get(key)
-        if value is None or value == "":
-            return default
-        return str(value).strip()
-
-    def _should_skip_natural_language_router(self, event: AstrMessageEvent) -> bool:
-        """判断是否跳过自然语言路由的前置安全边界。"""
-
-        if not self._config_bool("enable_natural_language_control", True):
-            return True
-
-        text = (event.message_str or "").strip()
-        if not text or text.startswith("/"):
-            return True
-
-        scope = self._config_str("natural_language_router_scope", "direct").lower()
-        if scope in {"all", "all_messages", "all-messages", "所有", "全量"}:
-            return False
-
-        return not (
-            event.is_private_chat()
-            or bool(getattr(event, "is_at_or_wake_command", False))
-            or bool(getattr(event, "is_wake", False))
-        )
-
-    async def _get_router_provider_id(
-        self,
-        handlers: CommandHandlers,
-        event: AstrMessageEvent,
-    ) -> str:
-        """解析自然语言路由使用的模型提供商。"""
-
-        configured_provider = self._config_str("llm_provider", "")
-        if configured_provider:
-            return configured_provider
-        return await handlers._get_provider_id(event)
-
-    async def _route_natural_language_agent_request(
-        self,
-        event: AstrMessageEvent,
-        provider_id: str,
-    ) -> str | None:
-        """让 LLM 判断普通消息是否应该交给自主编排器。"""
-
-        if self._should_skip_natural_language_router(event):
-            return None
-
-        message = (event.message_str or "").strip()
-        is_direct = (
-            event.is_private_chat()
-            or bool(getattr(event, "is_at_or_wake_command", False))
-            or bool(getattr(event, "is_wake", False))
-        )
-        prompt = f"""你是 AstrBot 的消息路由器，需要判断一条普通聊天消息是否应该交给“自主智能体编排器”。
-
-自主智能体编排器适合处理：
-- 用户要求安装、搜索、配置、卸载、更新插件
-- 用户要求配置 MCP、创建/编辑 Skill、运行代码或命令、调试日志/报错
-- 用户要求创建文件、写网页/程序/脚本、搭建项目、生成可落地的技术产物
-- 用户要求多步骤排查、操作服务器、检查系统状态、修复问题
-
-不要交给编排器的情况：
-- 普通闲聊、情绪陪伴、角色扮演、日常问答
-- 只需要模型直接回答的知识性问题
-- 模糊、不像是在请求执行任务的句子
-- 群聊中没有明显对机器人发出的任务请求
-
-上下文：
-- 私聊或已 @/唤醒机器人: {is_direct}
-- 用户身份: {getattr(event, "role", "")}
-- 消息文本: {message}
-
-只输出一个 JSON 对象，不要解释，不要 markdown。字段要求：
-- route_to_agent: boolean，只有需要交给编排器时为 true
-- rewritten_request: string，route_to_agent=true 时把用户真实任务改写成简洁明确的中文；否则为空字符串
-- reason: string，一句话说明路由原因
-"""
-
-        try:
-            response = await self.context.llm_generate(
-                chat_provider_id=provider_id,
-                prompt=prompt,
-                system_prompt="你是严格的 JSON 路由分类器，只输出 JSON。",
-            )
-            decision = self._parse_router_decision(response.completion_text)
-        except Exception as exc:
-            logger.warning("自然语言 LLM 路由失败，放行给默认聊天流程: %s", exc, exc_info=True)
-            return None
-
-        if not decision.get("route_to_agent"):
-            logger.debug("自然语言 LLM 路由未命中: %s", decision.get("reason"))
-            return None
-
-        rewritten = str(decision.get("rewritten_request") or "").strip()
-        if not rewritten:
-            rewritten = message
-        logger.info("自然语言 LLM 路由命中: %s", str(decision.get("reason") or "")[:120])
-        return rewritten
-
-    @staticmethod
-    def _parse_router_decision(text: str) -> dict[str, Any]:
-        """解析路由模型返回的 JSON。"""
-
-        raw = (text or "").strip()
-        if raw.startswith("```json"):
-            raw = raw.split("```json", 1)[1].split("```", 1)[0].strip()
-        elif raw.startswith("```"):
-            raw = raw.split("```", 1)[1].split("```", 1)[0].strip()
-        if "{" in raw and "}" in raw:
-            raw = raw[raw.find("{") : raw.rfind("}") + 1]
-        data = json.loads(raw)
-        route_value = data.get("route_to_agent", False)
-        if isinstance(route_value, str):
-            route_value = route_value.strip().lower() in {"1", "true", "yes", "y", "是", "需要", "route"}
-        return {
-            "route_to_agent": bool(route_value),
-            "rewritten_request": str(data.get("rewritten_request") or ""),
-            "reason": str(data.get("reason") or ""),
-        }
-
-    @filter.regex(r"(?s).+")
-    async def handle_natural_language_agent(
-        self,
-        event: AstrMessageEvent,
-    ) -> AsyncIterator[Any]:
-        """
-        自然语言控制入口。
-
-        捕获普通消息后交给 LLM 路由器判断；只有模型判定为技术执行任务时才复用 `/agent`。
-        """
-
-        await self.initialize()
-        handlers = self._get_command_handlers()
-        provider_id = await self._get_router_provider_id(handlers, event)
-        user_request = await self._route_natural_language_agent_request(event, provider_id)
-        if user_request is None:
-            return
-
-        original_message = event.message_str
-        event.message_str = user_request
-        event.should_call_llm(False)
-        try:
-            async for result in handlers.handle_agent(event):
-                yield result
-        finally:
-            event.message_str = original_message
-
+    # ==================================================================
+    # /agent
+    # ==================================================================
     @filter.command("agent")
-    async def handle_agent(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
-        """
-        全自主 Agent - 可以执行任何操作
+    async def cmd_agent(self, event: AstrMessageEvent, task: GreedyStr = "") -> AsyncIterator[Any]:
+        """全自主执行任务；也支持 status/templates/sync 子查询"""
 
-        用法: /agent <任务描述>
-
-        示例:
-        - /agent 帮我搜索有什么好用的翻译插件
-        - /agent 帮我写一个查询天气的 Skill
-        - /agent 帮我配置一个联网搜索的 MCP
-        - /agent 为什么刚才的代码报错了，帮我修复
-        - /agent 用沙盒运行这段 Python 代码
-        """
-        await self.initialize()
-        handlers = self._get_command_handlers()
-        async for result in handlers.handle_agent(event):
+        async for result in self._handlers().handle_agent(event, str(task)):
             yield result
 
-    @filter.command("plugin")
-    async def handle_plugin(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
-        """
-        插件管理
+    # ==================================================================
+    # /plugin
+    # ==================================================================
+    @filter.command_group("plugin")
+    def plugin_group(self):
+        """插件管理指令组"""
 
-        用法:
-        - /plugin search <关键词>   搜索插件市场
-        - /plugin install <url>     安装插件（管理员，自动使用 GitHub 加速）
-        - /plugin list              列出已安装插件
-        - /plugin remove <名称>     卸载插件（管理员）
-        - /plugin update <名称>     更新插件（管理员）
-        - /plugin proxy             查看 GitHub 加速设置
-        """
-        await self.initialize()
-        handlers = self._get_command_handlers()
-        async for result in handlers.handle_plugin(event):
+    @plugin_group.command("search")
+    async def cmd_plugin_search(
+        self, event: AstrMessageEvent, keyword: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """搜索插件市场"""
+
+        async for result in self._handlers().plugin_search(event, str(keyword)):
             yield result
 
-    @filter.command("skill")
-    async def handle_skill(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
-        """
-        Skill 管理
+    @plugin_group.command("list")
+    async def cmd_plugin_list(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """列出已安装插件"""
 
-        用法:
-        - /skill list                列出所有 Skill（管理员）
-        - /skill create <名称>       创建新 Skill（交互式）
-        - /skill edit <名称>         编辑 Skill
-        - /skill delete <名称>       删除 Skill（管理员）
-        - /skill read <名称>         查看 Skill 内容（管理员）
-        """
-        await self.initialize()
-        handlers = self._get_command_handlers()
-        async for result in handlers.handle_skill(event):
+        async for result in self._handlers().plugin_list(event):
             yield result
 
-    @filter.command("mcp")
-    async def handle_mcp(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
-        """
-        MCP 配置管理
+    @plugin_group.command("proxy")
+    async def cmd_plugin_proxy(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """查看 GitHub 加速代理配置"""
 
-        用法:
-        - /mcp list                  列出所有 MCP 服务（管理员）
-        - /mcp add <名称> <url>      添加 MCP 服务（管理员）
-        - /mcp remove <名称>         移除 MCP 服务（管理员）
-        - /mcp test <名称>           测试 MCP 连接（管理员）
-        - /mcp tools <名称>          查看 MCP 工具（管理员）
-        """
-        await self.initialize()
-        handlers = self._get_command_handlers()
-        async for result in handlers.handle_mcp(event):
+        async for result in self._handlers().plugin_proxy(event):
             yield result
 
-    @filter.command("exec")
-    async def handle_exec(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
-        """
-        执行代码/命令（使用 AstrBot 全局沙盒配置）
+    @filter.permission_type(ADMIN)
+    @plugin_group.command("install")
+    async def cmd_plugin_install(
+        self, event: AstrMessageEvent, url: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """安装插件（管理员）"""
 
-        用法:
-        - /exec <命令>             使用全局配置执行
-        - /exec local <命令>       强制本地执行
-        - /exec sandbox <命令>     强制沙盒执行
-        - /exec python <代码>      执行 Python 代码
-        - /exec config             查看当前执行环境配置
-        """
-        await self.initialize()
-        handlers = self._get_command_handlers()
-        async for result in handlers.handle_exec(event):
+        async for result in self._handlers().plugin_install(event, str(url)):
             yield result
 
-    @filter.command("debug")
-    async def handle_debug(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
-        """
-        自我诊断和 Debug（管理员）
+    @filter.permission_type(ADMIN)
+    @plugin_group.command("remove")
+    async def cmd_plugin_remove(
+        self, event: AstrMessageEvent, name: str = ""
+    ) -> AsyncIterator[Any]:
+        """卸载插件（管理员）"""
 
-        用法:
-        - /debug status        查看系统状态
-        - /debug logs          查看最近错误日志
-        - /debug analyze <问题描述>  分析问题
-        """
-        await self.initialize()
-        handlers = self._get_command_handlers()
-        async for result in handlers.handle_debug(event):
+        async for result in self._handlers().plugin_remove(event, name):
             yield result
 
-    @filter.command("sandbox")
-    async def handle_sandbox(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
-        """
-        CodeSandbox 沙盒管理（类似 CodeBox API）
+    @filter.permission_type(ADMIN)
+    @plugin_group.command("update")
+    async def cmd_plugin_update(
+        self, event: AstrMessageEvent, name: str = ""
+    ) -> AsyncIterator[Any]:
+        """更新插件（管理员）"""
 
-        用法:
-        - /sandbox status              沙盒健康状态
-        - /sandbox exec <代码>         执行 Python 代码
-        - /sandbox bash <命令>         执行 Shell 命令
-        - /sandbox files [路径]        列出沙盒文件
-        - /sandbox upload <路径> <内容> 上传文件
-        - /sandbox download <路径>     下载文件
-        - /sandbox install <包名>      安装 Python 包
-        - /sandbox packages            列出已安装包
-        - /sandbox variables           查看会话变量
-        - /sandbox restart             重启沙盒
-        - /sandbox url <url> <路径>    从 URL 下载文件到沙盒
-        """
-        await self.initialize()
-        handlers = self._get_command_handlers()
-        async for result in handlers.handle_sandbox(event):
+        async for result in self._handlers().plugin_update(event, name):
             yield result
 
-    async def terminate(self) -> None:
-        """插件停用时清理沙盒资源"""
-        if self.runtime is not None:
-            await self.runtime.astop()
-        logger.info("全自主智能体编排器已停用")
+    # ==================================================================
+    # /skill
+    # ==================================================================
+    @filter.command_group("skill")
+    def skill_group(self):
+        """Skill 管理指令组"""
+
+    @filter.permission_type(ADMIN)
+    @skill_group.command("list")
+    async def cmd_skill_list(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """列出全部 Skill（管理员）"""
+
+        async for result in self._handlers().skill_list(event):
+            yield result
+
+    @skill_group.command("create")
+    async def cmd_skill_create(
+        self, event: AstrMessageEvent, name: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """创建 Skill 的引导"""
+
+        async for result in self._handlers().skill_create(event, str(name)):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @skill_group.command("read")
+    async def cmd_skill_read(
+        self, event: AstrMessageEvent, name: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """读取 Skill 内容（管理员）"""
+
+        async for result in self._handlers().skill_read(event, str(name)):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @skill_group.command("delete")
+    async def cmd_skill_delete(
+        self, event: AstrMessageEvent, name: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """删除 Skill（管理员）"""
+
+        async for result in self._handlers().skill_delete(event, str(name)):
+            yield result
+
+    # ==================================================================
+    # /mcp（管理员）
+    # ==================================================================
+    @filter.command_group("mcp")
+    def mcp_group(self):
+        """MCP 服务器管理指令组"""
+
+    @filter.permission_type(ADMIN)
+    @mcp_group.command("list")
+    async def cmd_mcp_list(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """列出 MCP 服务器（管理员）"""
+
+        async for result in self._handlers().mcp_list(event):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @mcp_group.command("add")
+    async def cmd_mcp_add(
+        self, event: AstrMessageEvent, name: str = "", url: str = ""
+    ) -> AsyncIterator[Any]:
+        """添加 MCP 服务器（管理员）"""
+
+        async for result in self._handlers().mcp_add(event, name, url):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @mcp_group.command("remove")
+    async def cmd_mcp_remove(self, event: AstrMessageEvent, name: str = "") -> AsyncIterator[Any]:
+        """移除 MCP 服务器（管理员）"""
+
+        async for result in self._handlers().mcp_remove(event, name):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @mcp_group.command("test")
+    async def cmd_mcp_test(self, event: AstrMessageEvent, name: str = "") -> AsyncIterator[Any]:
+        """测试 MCP 服务器连通性（管理员）"""
+
+        async for result in self._handlers().mcp_test(event, name):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @mcp_group.command("tools")
+    async def cmd_mcp_tools(self, event: AstrMessageEvent, name: str = "") -> AsyncIterator[Any]:
+        """列出 MCP 服务器的工具（管理员）"""
+
+        async for result in self._handlers().mcp_tools(event, name):
+            yield result
+
+    # ==================================================================
+    # /exec（管理员）
+    # ==================================================================
+    @filter.command_group("exec")
+    def exec_group(self):
+        """快速执行指令组"""
+
+    @filter.permission_type(ADMIN)
+    @exec_group.command("config")
+    async def cmd_exec_config(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """查看执行模式配置（管理员）"""
+
+        async for result in self._handlers().exec_config(event):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @exec_group.command("run")
+    async def cmd_exec_run(
+        self, event: AstrMessageEvent, command: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """自动模式执行命令（管理员）"""
+
+        async for result in self._handlers().exec_run(event, str(command), "auto"):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @exec_group.command("local")
+    async def cmd_exec_local(
+        self, event: AstrMessageEvent, command: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """本地执行命令（管理员）"""
+
+        async for result in self._handlers().exec_run(event, str(command), "local"):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @exec_group.command("sandbox")
+    async def cmd_exec_sandbox(
+        self, event: AstrMessageEvent, command: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """沙盒执行命令（管理员）"""
+
+        async for result in self._handlers().exec_run(event, str(command), "sandbox"):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @exec_group.command("python")
+    async def cmd_exec_python(
+        self, event: AstrMessageEvent, code: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """执行 Python 代码（管理员）"""
+
+        async for result in self._handlers().exec_run(event, str(code), "python"):
+            yield result
+
+    # ==================================================================
+    # /sandbox（管理员）
+    # ==================================================================
+    @filter.command_group("sandbox")
+    def sandbox_group(self):
+        """沙盒管理指令组"""
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("status")
+    async def cmd_sandbox_status(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """沙盒健康检查（管理员）"""
+
+        async for result in self._handlers().sandbox_status(event):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("exec")
+    async def cmd_sandbox_exec(
+        self, event: AstrMessageEvent, code: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """沙盒执行 Python（管理员）"""
+
+        async for result in self._handlers().sandbox_exec(event, str(code), "ipython"):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("bash")
+    async def cmd_sandbox_bash(
+        self, event: AstrMessageEvent, code: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """沙盒执行 Shell（管理员）"""
+
+        async for result in self._handlers().sandbox_exec(event, str(code), "bash"):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("stream")
+    async def cmd_sandbox_stream(
+        self, event: AstrMessageEvent, code: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """沙盒流式执行（管理员）"""
+
+        async for result in self._handlers().sandbox_stream(event, str(code)):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("files")
+    async def cmd_sandbox_files(
+        self, event: AstrMessageEvent, path: str = "."
+    ) -> AsyncIterator[Any]:
+        """列出沙盒文件（管理员）"""
+
+        async for result in self._handlers().sandbox_files(event, path):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("upload")
+    async def cmd_sandbox_upload(
+        self, event: AstrMessageEvent, path: str = "", content: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """写入沙盒文件（管理员）"""
+
+        async for result in self._handlers().sandbox_upload(event, path, str(content)):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("download")
+    async def cmd_sandbox_download(
+        self, event: AstrMessageEvent, path: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """读取沙盒文件（管理员）"""
+
+        async for result in self._handlers().sandbox_download(event, str(path)):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("install")
+    async def cmd_sandbox_install(
+        self, event: AstrMessageEvent, packages: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """安装 Python 包（管理员）"""
+
+        async for result in self._handlers().sandbox_install(event, str(packages)):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("packages")
+    async def cmd_sandbox_packages(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """列出已安装包（管理员）"""
+
+        async for result in self._handlers().sandbox_packages(event):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("variables")
+    async def cmd_sandbox_variables(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """查看会话变量（管理员）"""
+
+        async for result in self._handlers().sandbox_variables(event):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("restart")
+    async def cmd_sandbox_restart(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """重启沙盒（管理员）"""
+
+        async for result in self._handlers().sandbox_restart(event):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @sandbox_group.command("url")
+    async def cmd_sandbox_url(
+        self, event: AstrMessageEvent, url: str = "", save_path: str = ""
+    ) -> AsyncIterator[Any]:
+        """从 URL 下载文件到沙盒（管理员）"""
+
+        async for result in self._handlers().sandbox_url(event, url, save_path):
+            yield result
+
+    # ==================================================================
+    # /debug（管理员）
+    # ==================================================================
+    @filter.command_group("debug")
+    def debug_group(self):
+        """诊断指令组"""
+
+    @filter.permission_type(ADMIN)
+    @debug_group.command("status")
+    async def cmd_debug_status(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """系统状态（管理员）"""
+
+        async for result in self._handlers().debug_status(event):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @debug_group.command("logs")
+    async def cmd_debug_logs(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+        """最近错误（管理员）"""
+
+        async for result in self._handlers().debug_logs(event):
+            yield result
+
+    @filter.permission_type(ADMIN)
+    @debug_group.command("analyze")
+    async def cmd_debug_analyze(
+        self, event: AstrMessageEvent, problem: GreedyStr = ""
+    ) -> AsyncIterator[Any]:
+        """分析问题（管理员）"""
+
+        async for result in self._handlers().debug_analyze(event, str(problem)):
+            yield result

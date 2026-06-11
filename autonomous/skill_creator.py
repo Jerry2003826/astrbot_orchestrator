@@ -7,14 +7,13 @@ Skill 创建/管理工具
 - 管理 Skill 生命周期
 """
 
-import logging
 import os
 from pathlib import Path
 from typing import Any, cast
 
-from ..shared import ensure_within_base, slugify_identifier
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
+from ..shared import ensure_within_base, slugify_identifier
 
 
 class SkillCreatorTool:

@@ -1,253 +1,146 @@
-"""MCPBridge 单元测试。"""
+"""MCPBridge（官方 get_llm_tool_manager 单一路径）测试。"""
 
 from __future__ import annotations
 
-import logging
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 
 from astrbot_orchestrator_v5.orchestrator.mcp_bridge import MCPBridge
 
-if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
 
-    _PYTEST_TYPE_IMPORTS = (
-        CaptureFixture,
-        FixtureRequest,
-        LogCaptureFixture,
-        MonkeyPatch,
-        MockerFixture,
-    )
+class FakeMcpTool:
+    def __init__(self, name: str, description: str = "", schema: Any = None) -> None:
+        self.name = name
+        self.description = description
+        self.inputSchema = schema or {"type": "object"}
 
 
-class FakeMcpClient:
-    """MCP 客户端替身。"""
-
+class FakeClient:
     def __init__(
         self,
-        *,
-        active: bool,
-        tools: list[Any],
-        result: Any = None,
+        tools: list[FakeMcpTool] | None = None,
+        active: bool = True,
     ) -> None:
-        """保存客户端状态和工具列表。"""
-
+        self.tools = tools or []
         self.active = active
-        self.tools = tools
-        self.result = result if result is not None else {"ok": True}
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.raise_on_call: Exception | None = None
 
     async def call_tool_with_reconnect(
-        self,
-        *,
-        tool_name: str,
-        arguments: dict[str, Any],
-    ) -> Any:
-        """记录工具调用并返回预设结果。"""
-
-        self.calls.append({"tool_name": tool_name, "arguments": arguments})
-        return self.result
+        self, tool_name: str, arguments: dict[str, Any], read_timeout_seconds: Any
+    ) -> str:
+        if self.raise_on_call is not None:
+            raise self.raise_on_call
+        self.calls.append((tool_name, arguments))
+        return f"result:{tool_name}"
 
 
-class FakeToolManager:
-    """FunctionToolManager 替身。"""
+class FakeBridgeContext:
+    def __init__(self, clients: dict[str, Any] | None = None, broken: bool = False) -> None:
+        self._clients = clients or {}
+        self._broken = broken
 
-    def __init__(
-        self,
-        mcp_client_dict: dict[str, FakeMcpClient],
-        *,
-        error: Exception | None = None,
-    ) -> None:
-        """初始化客户端映射和异常行为。"""
-
-        self.mcp_client_dict = mcp_client_dict
-        self.error = error
-
-    @property
-    def mcp_client_dict(self) -> dict[str, FakeMcpClient]:
-        """返回客户端映射，必要时抛出异常。"""
-
-        if self.error is not None:
-            raise self.error
-        return self._mcp_client_dict
-
-    @mcp_client_dict.setter
-    def mcp_client_dict(self, value: dict[str, FakeMcpClient]) -> None:
-        """设置客户端映射。"""
-
-        self._mcp_client_dict = value
+    def get_llm_tool_manager(self) -> Any:
+        if self._broken:
+            raise RuntimeError("manager unavailable")
+        return SimpleNamespace(mcp_client_dict=self._clients)
 
 
-def make_context(tool_manager: Any | None = None) -> Any:
-    """构造带可选工具管理器的上下文。"""
-
-    context = SimpleNamespace()
-    if tool_manager is not None:
-        context.provider_manager = SimpleNamespace(llm_tools=tool_manager)
-    return context
+def make_bridge(clients: dict[str, Any] | None = None, broken: bool = False) -> MCPBridge:
+    return MCPBridge(FakeBridgeContext(clients, broken))
 
 
-def make_tool(
-    name: str,
-    description: str | None = None,
-    input_schema: dict[str, Any] | None = None,
-) -> Any:
-    """构造测试用 MCP 工具对象。"""
-
-    tool = SimpleNamespace(name=name, description=description)
-    if input_schema is not None:
-        tool.inputSchema = input_schema
-    return tool
-
-
-def test_mcp_bridge_get_tool_manager_covers_success_and_missing_context(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """工具管理器访问应覆盖成功和缺失 provider_manager 的告警路径。"""
-
-    manager = FakeToolManager({})
-    bridge = MCPBridge(context=make_context(manager))
-    missing_bridge = MCPBridge(context=make_context())
-
-    caplog.set_level(logging.WARNING)
-
-    assert bridge._get_tool_manager() is manager
-    assert missing_bridge._get_tool_manager() is None
-    assert "无法获取 FunctionToolManager" in caplog.text
-
-
-def test_mcp_bridge_list_tools_servers_and_queries_cover_cache_and_error_paths(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """工具枚举应覆盖缓存、服务器摘要、查询与异常路径。"""
-
-    alpha_tool = make_tool("alpha", "first tool", {"type": "object"})
-    beta_tool = make_tool("beta", None)
-    tool_manager = FakeToolManager(
+def test_list_tools_reads_active_clients_only() -> None:
+    bridge = make_bridge(
         {
-            "server-a": FakeMcpClient(active=True, tools=[alpha_tool, beta_tool]),
-            "server-b": FakeMcpClient(active=False, tools=[make_tool("ignored")]),
+            "alpha": FakeClient([FakeMcpTool("a1", "tool a1"), FakeMcpTool("a2")]),
+            "beta": FakeClient([FakeMcpTool("b1")], active=False),
         }
     )
-    bridge = MCPBridge(context=make_context(tool_manager))
 
-    first_tools = bridge.list_tools()
-    second_tools = bridge.list_tools()
-    servers = bridge.list_servers()
+    tools = bridge.list_tools()
 
-    assert first_tools == [
+    names = {t["name"] for t in tools}
+    assert names == {"a1", "a2"}
+    assert all(t["server"] == "alpha" for t in tools)
+    assert all(t["type"] == "mcp_tool" for t in tools)
+
+
+def test_list_tools_returns_empty_when_manager_unavailable() -> None:
+    bridge = make_bridge(broken=True)
+
+    assert bridge.list_tools() == []
+    assert bridge.list_servers() == {}
+
+
+def test_list_servers_reports_status_and_counts() -> None:
+    bridge = make_bridge(
         {
-            "name": "alpha",
-            "description": "first tool",
-            "server": "server-a",
-            "parameters": {"type": "object"},
-            "type": "mcp_tool",
-        },
-        {
-            "name": "beta",
-            "description": "",
-            "server": "server-a",
-            "parameters": {},
-            "type": "mcp_tool",
-        },
-    ]
-    assert second_tools is first_tools
-    assert servers == {
-        "server-a": {"active": True, "tool_count": 2},
-        "server-b": {"active": False, "tool_count": 1},
-    }
-    assert bridge.get_tool("alpha") == first_tools[0]
-    assert bridge.get_tool("missing") is None
-    assert bridge.get_tools_by_server("server-a") == first_tools
-    assert bridge.get_tools_by_server("server-b") == []
-
-    caplog.set_level(logging.ERROR)
-    error_bridge = MCPBridge(
-        context=make_context(FakeToolManager({}, error=RuntimeError("broken tool manager")))
+            "alpha": FakeClient([FakeMcpTool("a1")]),
+            "beta": FakeClient([], active=False),
+        }
     )
 
-    assert error_bridge.list_tools() == []
-    assert error_bridge.list_servers() == {}
-    assert "读取 MCP 工具失败: broken tool manager" in caplog.text
+    servers = bridge.list_servers()
 
-    cold_bridge = MCPBridge(context=make_context())
-    assert cold_bridge.list_servers() == {}
-    assert cold_bridge.list_tools() == []
+    assert servers == {
+        "alpha": {"active": True, "tool_count": 1},
+        "beta": {"active": False, "tool_count": 0},
+    }
 
 
-def test_mcp_bridge_build_tools_prompt_covers_empty_and_grouped_rendering() -> None:
-    """工具提示词应覆盖空状态和按服务器分组展示。"""
+def test_get_tool_and_by_server() -> None:
+    bridge = make_bridge({"alpha": FakeClient([FakeMcpTool("a1", "desc")])})
 
-    bridge = MCPBridge(context=make_context())
-    bridge._tools_cache = []
-    bridge._cache_valid = True
-    assert bridge.build_tools_prompt() == ""
+    assert bridge.get_tool("a1")["description"] == "desc"
+    assert bridge.get_tool("missing") is None
+    assert [t["name"] for t in bridge.get_tools_by_server("alpha")] == ["a1"]
+    assert bridge.get_tools_by_server("other") == []
 
-    bridge._tools_cache = [
-        {"name": "alpha", "description": "first", "server": "server-a"},
-        {"name": "beta", "description": "second", "server": "server-a"},
-        {"name": "gamma", "description": "third", "server": "server-b"},
-    ]
 
-    rendered = bridge.build_tools_prompt()
+def test_build_tools_prompt_groups_by_server() -> None:
+    bridge = make_bridge(
+        {
+            "alpha": FakeClient([FakeMcpTool("a1", "tool a1")]),
+            "beta": FakeClient([FakeMcpTool("b1", "tool b1")]),
+        }
+    )
 
-    assert "## 可用 MCP 工具" in rendered
-    assert "\n### server-a" in rendered
-    assert "- **alpha**: first" in rendered
-    assert "- **gamma**: third" in rendered
+    prompt = bridge.build_tools_prompt()
+
+    assert "## 可用 MCP 工具" in prompt
+    assert "### alpha" in prompt
+    assert "- **b1**: tool b1" in prompt
+
+    assert make_bridge().build_tools_prompt() == ""
 
 
 @pytest.mark.asyncio
-async def test_mcp_bridge_call_tool_covers_missing_manager_tool_server_and_success() -> None:
-    """工具调用应覆盖所有前置校验与成功路径。"""
+async def test_call_tool_uses_official_reconnect_api() -> None:
+    client = FakeClient([FakeMcpTool("a1")])
+    bridge = make_bridge({"alpha": client})
 
-    no_manager_bridge = MCPBridge(context=make_context())
-    with pytest.raises(RuntimeError, match="MCP 工具管理器不可用"):
-        await no_manager_bridge.call_tool("alpha", {})
+    result = await bridge.call_tool("a1", {"x": 1})
 
-    alpha_client = FakeMcpClient(active=True, tools=[make_tool("alpha")], result={"value": 1})
-    success_bridge = MCPBridge(context=make_context(FakeToolManager({"server-a": alpha_client})))
-    missing_tool_bridge = MCPBridge(context=make_context(FakeToolManager({})))
-    missing_server_bridge = MCPBridge(context=make_context(FakeToolManager({})))
-    missing_server_bridge._tools_cache = [
-        {
-            "name": "alpha",
-            "description": "",
-            "server": "server-a",
-            "parameters": {},
-            "type": "mcp_tool",
-        }
-    ]
-    missing_server_bridge._cache_valid = True
-
-    with pytest.raises(ValueError, match="工具不存在: alpha"):
-        await missing_tool_bridge.call_tool("alpha", {})
-
-    with pytest.raises(ValueError, match="MCP 服务器不存在: server-a"):
-        await missing_server_bridge.call_tool("alpha", {"q": "hello"})
-
-    result = await success_bridge.call_tool("alpha", {"q": "hello"})
-
-    assert result == {"value": 1}
-    assert alpha_client.calls == [{"tool_name": "alpha", "arguments": {"q": "hello"}}]
+    assert result == "result:a1"
+    assert client.calls == [("a1", {"x": 1})]
 
 
-def test_mcp_bridge_invalidate_cache_clears_cached_tools_and_servers() -> None:
-    """缓存失效应清空工具和服务器缓存。"""
+@pytest.mark.asyncio
+async def test_call_tool_raises_for_unknown_tool_or_server() -> None:
+    bridge = make_bridge({"alpha": FakeClient([FakeMcpTool("a1")])})
 
-    bridge = MCPBridge(context=make_context())
-    bridge._cache_valid = True
-    bridge._tools_cache = [{"name": "alpha"}]
-    bridge._servers_cache = {"server-a": {"active": True}}
+    with pytest.raises(ValueError, match="工具不存在"):
+        await bridge.call_tool("missing", {})
 
-    bridge.invalidate_cache()
 
-    assert bridge._cache_valid is False
-    assert bridge._tools_cache == []
-    assert bridge._servers_cache == {}
+@pytest.mark.asyncio
+async def test_call_tool_propagates_client_errors() -> None:
+    client = FakeClient([FakeMcpTool("a1")])
+    client.raise_on_call = RuntimeError("connection lost")
+    bridge = make_bridge({"alpha": client})
+
+    with pytest.raises(RuntimeError, match="connection lost"):
+        await bridge.call_tool("a1", {})

@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import logging
 import os
 import posixpath
 import re
 from typing import Any, Mapping, cast
 
+from astrbot.api import logger
+
 from ..orchestrator.code_extractor import CodeExtractor, CodeWriter
 from ..shared import UnsafePathError, ensure_within_base, quote_shell_path, slugify_identifier
-
-logger = logging.getLogger(__name__)
 
 # 扫描沙盒文件时允许的候选工作目录前缀
 # 这些目录会被动态拼接到 `find` 命令，且在计算相对路径时被剥离。

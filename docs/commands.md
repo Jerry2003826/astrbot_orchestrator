@@ -1,199 +1,122 @@
 # 命令参考
 
-`astrbot_orchestrator_v5` 的命令入口定义在 `main.py`，实际分发逻辑位于 `entrypoints/command_handlers.py`。
+命令入口定义在 `main.py`（官方 `@filter.command` / `@filter.command_group` 装饰器），分发逻辑位于 `entrypoints/command_handlers.py`。
 
-这份文档面向两类读者：
+权限标注：
 
-- `使用者`
-  希望快速知道每条命令能做什么、怎么用
-- `开发者`
-  希望理解入口层如何被组织，以及哪些命令会触发高风险副作用
+- **（管理员）** = 官方 `@filter.permission_type(ADMIN)` 装饰器控制，非管理员命令不会触发。
+- 此外，对应能力的 FunctionTool 在默认聊天中被 LLM 调用时，工具内部还有一层 `event.is_admin()` 门控。
 
 ## 总览
 
-| 命令 | 说明 | 典型场景 |
-| --- | --- | --- |
-| `/agent` | 综合智能体入口 | 自然语言任务、复杂编排、多步骤自动化 |
-| `/plugin` | 插件管理 | 搜索市场、安装、卸载、更新插件 |
-| `/skill` | Skill 管理 | 创建、编辑、删除、读取 `SKILL.md` |
-| `/mcp` | MCP 管理 | 添加、删除、测试服务并查看工具 |
-| `/exec` | 统一执行入口 | 执行命令、Python 代码、查看执行配置 |
-| `/debug` | 自诊断入口 | 查看系统状态、近期错误、问题分析 |
-| `/sandbox` | 底层沙盒接口 | 直接执行代码、管理文件、安装包、重启沙盒 |
+| 命令 | 说明 |
+| --- | --- |
+| `/agent` | 官方 tool_loop_agent 驱动的综合任务入口 |
+| `/plugin` | 插件市场搜索、安装、卸载、更新 |
+| `/skill` | Skill 列表、创建、读取、删除 |
+| `/mcp` | MCP 服务器管理 |
+| `/exec` | 统一执行器（自动/本地/沙盒/Python） |
+| `/sandbox` | 底层沙盒接口 |
+| `/debug` | 系统状态与问题分析 |
 
 ## `/agent`
 
-`/agent` 是最核心的自然语言入口。  
-适合让系统自己判断：应该直接回答、调用工具、还是升级为多 `SubAgent` 协作。
+```text
+/agent <任务描述>     全自主执行任务（受限流）
+/agent status        查看官方子代理(handoffs)状态
+/agent templates     查看预设子代理模板
+/agent sync          同步模板到宿主 subagent 配置（管理员）
+```
 
-### 适合的问题
+`/agent <任务>` 的执行方式：组装本插件工具 + 宿主已有工具 → `context.tool_loop_agent`（`max_steps` 取配置 `max_iterations`，整体超时取 `task_timeout`）→ 回答 + 代码产物摘要。
 
-- 帮我分析这个需求并生成实现方案
-- 帮我搜索有没有合适的翻译插件
-- 帮我写一个查询天气的 Skill
-- 帮我配置一个联网搜索的 MCP
-- 这段代码为什么报错，帮我分析一下
-
-### 示例
+示例：
 
 ```text
-/agent 帮我分析一个支持多租户的聊天系统应该如何设计
-/agent 帮我写一个查询天气的 Skill，并告诉我怎么接入
-/agent 帮我检查当前执行环境为什么跑不起来
+/agent 帮我搜索有没有合适的翻译插件并装上
+/agent 写一个脚本统计 /workspace 下的文件类型分布并执行
+/agent 帮我配置一个联网搜索的 MCP
 ```
 
 ## `/plugin`
 
-用于插件市场相关的操作。
-
-### Plugin 子命令
-
-- `/plugin search <关键词>`
-- `/plugin install <url>`（管理员）
-- `/plugin list`
-- `/plugin remove <名称>`（管理员）
-- `/plugin update <名称>`（管理员）
-- `/plugin proxy`
-
-### Plugin 示例
-
 ```text
-/plugin search 翻译
-/plugin install https://github.com/example/plugin-repo
-/plugin list
+/plugin search <关键词>   搜索插件市场
+/plugin list             列出已安装插件
+/plugin proxy            查看 GitHub 加速代理
+/plugin install <url>    安装插件（管理员）
+/plugin remove <名称>    卸载插件（管理员）
+/plugin update <名称>    更新插件（管理员）
 ```
 
 ## `/skill`
 
-用于管理 AstrBot Skill。
-
-### Skill 子命令
-
-- `/skill list`（管理员）
-- `/skill create <名称>`
-- `/skill edit <名称>`
-- `/skill delete <名称>`（管理员）
-- `/skill read <名称>`（管理员）
-
-### Skill 示例
-
 ```text
-/skill list
-/skill create weather_query
-/skill read weather_query
+/skill create <名称>     创建 Skill 的引导
+/skill list             列出全部 Skill（管理员）
+/skill read <名称>       读取 SKILL.md（管理员）
+/skill delete <名称>     删除 Skill（管理员）
 ```
 
-## `/mcp`
-
-用于管理 MCP 服务和工具。
-
-### MCP 子命令
-
-- `/mcp list`（管理员）
-- `/mcp add <名称> <url>`（管理员）
-- `/mcp remove <名称>`（管理员）
-- `/mcp test <名称>`（管理员）
-- `/mcp tools <名称>`（管理员）
-
-### MCP 示例
+## `/mcp`（全部管理员）
 
 ```text
-/mcp list
-/mcp add search https://example.com/mcp
-/mcp test search
+/mcp list               列出 MCP 服务器
+/mcp add <名称> <url>    添加服务器（仅公网 HTTPS）
+/mcp remove <名称>       移除服务器
+/mcp test <名称>         测试连通性
+/mcp tools <名称>        列出服务器的工具
 ```
 
-## `/exec`
-
-这是统一执行器入口，适合希望用当前配置执行命令或代码的场景。
-
-### Exec 子命令
-
-- `/exec <命令>`（管理员）
-- `/exec local <命令>`（管理员）
-- `/exec sandbox <命令>`（管理员）
-- `/exec python <代码>`（管理员）
-- `/exec config`（管理员）
-
-### Exec 示例
+## `/exec`（全部管理员）
 
 ```text
-/exec python print("hello")
-/exec local ls
-/exec config
+/exec run <命令>         自动模式执行
+/exec local <命令>       本地执行
+/exec sandbox <命令>     沙盒执行
+/exec python <代码>      执行 Python 代码
+/exec config            查看执行模式配置
 ```
 
-## `/debug`
-
-用于查看状态、自诊断和问题分析，仅管理员可用。
-
-### Debug 子命令
-
-- `/debug status`（管理员）
-- `/debug logs`（管理员）
-- `/debug analyze <问题描述>`（管理员）
-
-### Debug 示例
+## `/sandbox`（全部管理员）
 
 ```text
-/debug status
-/debug logs
-/debug analyze 为什么刚才的命令执行失败了
+/sandbox status                 健康检查
+/sandbox exec <代码>            执行 Python
+/sandbox bash <命令>            执行 Shell
+/sandbox stream <代码>          流式执行
+/sandbox files [路径]           列出文件
+/sandbox upload <路径> <内容>   写入文件
+/sandbox download <路径>        读取文件
+/sandbox install <包名>         安装 Python 包
+/sandbox packages               列出已安装包
+/sandbox variables              查看会话变量
+/sandbox restart                重启沙盒
+/sandbox url <url> <路径>       从 URL 下载文件到沙盒
 ```
 
-## `/sandbox`
-
-这是更底层的沙盒接口，适合直接操作执行环境，仅管理员可用。
-
-### Sandbox 子命令
-
-- `/sandbox status`（管理员）
-- `/sandbox exec <代码>`（管理员）
-- `/sandbox bash <命令>`（管理员）
-- `/sandbox files [路径]`（管理员）
-- `/sandbox upload <路径> <内容>`（管理员）
-- `/sandbox download <路径>`（管理员）
-- `/sandbox install <包名>`（管理员）
-- `/sandbox packages`（管理员）
-- `/sandbox variables`（管理员）
-- `/sandbox restart`（管理员）
-- `/sandbox url <url> <路径>`（管理员）
-
-### Sandbox 示例
+## `/debug`（全部管理员）
 
 ```text
-/sandbox status
-/sandbox exec print("hello from sandbox")
-/sandbox files /workspace
-/sandbox install pandas
+/debug status            系统状态（Python/内存/插件/模型/MCP/最近错误）
+/debug logs              最近错误记录
+/debug analyze <描述>     LLM 辅助分析问题
 ```
 
-## 权限与风险说明
+## 默认聊天中的工具调用
 
-下列能力都属于高风险副作用：
+开启对应配置开关后，下列 FunctionTool 会注册给宿主默认 Agent，普通聊天即可触发（高危操作要求触发者是管理员）：
 
-- 插件安装与更新
-- Skill 创建与删除
-- MCP 配置变更
-- 代码执行
-- 文件写入与持久化
+| 工具组 | 工具 |
+| --- | --- |
+| 插件 | `plugin_search` `plugin_list` `plugin_install`* `plugin_uninstall`* `plugin_update`* |
+| Skill | `skill_list` `skill_read` `skill_create`* `skill_delete`* |
+| MCP | `mcp_list` `mcp_list_tools` `mcp_add`* `mcp_remove`* `mcp_test`* |
+| 沙盒 | `sandbox_exec_python`* `sandbox_exec_bash`* `sandbox_file_read`* `sandbox_file_write`* `sandbox_install_packages`* |
+| 调试 | `debug_status`* `debug_recent_errors`* |
+| 工作流 | `workflow_list` `workflow_run`* |
 
-这些能力不应仅依赖模型判断，必须由宿主侧权限策略共同控制。
-
-## 使用建议
-
-如果你希望：
-
-- `一句话完成复杂任务`
-  优先使用 `/agent`
-- `直接管理具体资源`
-  使用 `/plugin`、`/skill`、`/mcp`
-- `快速执行命令或代码`
-  使用 `/exec`
-- `深入操作执行环境`
-  使用 `/sandbox`
-- `分析问题而不是执行任务`
-  使用 `/debug`
+`*` = 工具内置管理员门控。
 
 ## 相关文档
 

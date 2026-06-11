@@ -10,7 +10,6 @@ MCP 配置管理工具
 import asyncio
 import ipaddress
 import json
-import logging
 import os
 import re
 import socket
@@ -18,8 +17,8 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 import aiohttp
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
 _SENSITIVE_HEADER_NAMES = {
     "authorization",
     "proxy-authorization",
@@ -43,20 +42,21 @@ class MCPConfiguratorTool:
         self.context = context
 
     def _get_tool_manager(self) -> Any | None:
-        """获取 FunctionToolManager"""
+        """获取官方 FunctionToolManager（公开 API 单一路径）。"""
         try:
-            return self.context.provider_manager.llm_tools
-        except AttributeError:
+            return self.context.get_llm_tool_manager()
+        except Exception:
             return None
 
     def _get_mcp_config_path(self) -> str:
-        """获取 MCP 配置文件路径"""
-        try:
-            from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+        """获取 MCP 配置文件路径（与宿主一致的 data/mcp_server.json）。"""
+        tool_manager = self._get_tool_manager()
+        path = getattr(tool_manager, "mcp_config_path", None)
+        if path:
+            return str(path)
+        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-            return os.path.join(get_astrbot_data_path(), "mcp_config.json")
-        except ImportError:
-            return os.path.expanduser("~/.astrbot/data/mcp_config.json")
+        return os.path.join(get_astrbot_data_path(), "mcp_server.json")
 
     @staticmethod
     def _validate_server_url(url: str) -> None:

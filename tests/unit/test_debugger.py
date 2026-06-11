@@ -46,12 +46,10 @@ class FakeDebugContext:
         self._llm_responses = list(llm_responses or [])
         self._llm_error = llm_error
         self._stars = list(stars or [])
+        self._providers = list(providers or [])
+        self._mcp_clients = dict(mcp_clients or {})
         self._status_error = status_error
         self.llm_calls: list[dict[str, Any]] = []
-        self.provider_manager = SimpleNamespace(
-            get_all_providers=lambda: list(providers or []),
-            llm_tools=SimpleNamespace(mcp_client_dict=mcp_clients or {}),
-        )
 
     async def llm_generate(self, **kwargs: Any) -> SimpleNamespace:
         """记录 LLM 调用并返回预设结果。"""
@@ -68,6 +66,16 @@ class FakeDebugContext:
         if self._status_error is not None:
             raise self._status_error
         return list(self._stars)
+
+    def get_all_providers(self) -> list[Any]:
+        """返回模型提供商列表（对齐 v4.25.5 公开 API）。"""
+
+        return list(self._providers)
+
+    def get_llm_tool_manager(self) -> SimpleNamespace:
+        """返回带 mcp_client_dict 的工具管理器替身。"""
+
+        return SimpleNamespace(mcp_client_dict=self._mcp_clients)
 
 
 @pytest.fixture(autouse=True)

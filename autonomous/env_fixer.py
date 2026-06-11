@@ -6,9 +6,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-import logging
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class EnvironmentFixer:

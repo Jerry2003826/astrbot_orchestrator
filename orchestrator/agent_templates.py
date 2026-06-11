@@ -72,7 +72,13 @@ class AgentTemplateLibrary:
                     "不要用 '...' 或注释代替实际代码。"
                 ),
                 public_description="生成或修改代码实现的子代理",
-                tools=["sandbox", "skill_gen"],
+                tools=[
+                    "sandbox_exec_python",
+                    "sandbox_exec_bash",
+                    "sandbox_file_read",
+                    "sandbox_file_write",
+                    "sandbox_install_packages",
+                ],
             ),
             "test": AgentTemplate(
                 role="test",
@@ -82,7 +88,7 @@ class AgentTemplateLibrary:
                     "如果需要输出测试代码，请使用 ```语言:文件名 格式的 markdown 代码块。"
                 ),
                 public_description="验证实现并输出测试建议的子代理",
-                tools=["sandbox"],
+                tools=["sandbox_exec_python", "sandbox_exec_bash", "sandbox_file_read"],
             ),
             "research": AgentTemplate(
                 role="research",
@@ -104,7 +110,7 @@ class AgentTemplateLibrary:
                 name="debug_agent",
                 system_prompt=("你是调试专家，负责定位问题原因并给出修复建议。"),
                 public_description="排查问题并提出修复方案的子代理",
-                tools=["sandbox"],
+                tools=["debug_status", "debug_recent_errors", "sandbox_exec_python"],
             ),
         }
 

@@ -137,7 +137,7 @@ def test_agent_template_library_keeps_existing_tools_when_override_tools_is_not_
 
     assert debug_template is not None
     assert debug_template.name == "debug_agent_v2"
-    assert debug_template.tools == ["sandbox"]
+    assert debug_template.tools == ["debug_status", "debug_recent_errors", "sandbox_exec_python"]
 
 
 def test_agent_template_library_adds_new_override_role_with_non_list_tools_default() -> None:
@@ -231,7 +231,7 @@ def test_agent_template_library_build_spec_uses_template_defaults_when_optional_
     assert spec.name == "test_agent"
     assert spec.role == "test"
     assert "测试与质量专家" in spec.instructions
-    assert spec.tools == ["sandbox"]
+    assert spec.tools == ["sandbox_exec_python", "sandbox_exec_bash", "sandbox_file_read"]
     assert spec.public_description == "验证实现并输出测试建议的子代理"
     assert spec.provider_id is None
     assert spec.persona_id is None

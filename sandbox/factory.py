@@ -14,14 +14,13 @@
 from __future__ import annotations
 
 from importlib.util import find_spec
-import logging
 import os
 import socket
 import typing as t
 
-from .base import CodeSandbox
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
+from .base import CodeSandbox
 
 # 缓存检测结果，避免重复检测
 _inside_sandbox_cache: t.Optional[bool] = None

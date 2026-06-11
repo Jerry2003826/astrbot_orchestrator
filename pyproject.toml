@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astrbot-orchestrator-v5"
-version = "3.0.1"
-description = "AstrBot agent orchestrator plugin with LangGraph-inspired runtime design."
+version = "4.0.0"
+description = "AstrBot agent orchestrator plugin built on the official agent stack (tool_loop_agent + FunctionTool + HandoffTool)."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -77,7 +77,9 @@ indent-style = "space"
 [tool.mypy]
 python_version = "3.10"
 files = ["shared"]
-warn_return_any = true
+mypy_path = ["_astrbot_stub"]
+# 插件大量方法是对宿主 Context(Any 边界)的薄转发，warn_return_any 噪音过大
+warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false
 check_untyped_defs = true

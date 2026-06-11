@@ -22,14 +22,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import json
-import logging
 import shlex
 import typing as t
 
+from astrbot.api import logger
+
 from ..shared import resolve_path_within_base
 from .types import ExecChunk, ExecResult, SandboxFile, SandboxStatus
-
-logger = logging.getLogger(__name__)
 
 
 class CodeSandbox(ABC):

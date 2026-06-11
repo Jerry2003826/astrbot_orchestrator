@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-import logging
 from typing import Any, cast
+
+from astrbot.api import logger
 
 from ..sandbox import CodeSandbox, ExecChunk, ExecResult, SandboxFile
 from .execution_support import ExecutionCommandPolicy, ExecutionFormatter
 from .sandbox_runtime import SandboxRuntime
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)

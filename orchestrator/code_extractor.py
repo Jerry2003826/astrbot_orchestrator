@@ -3,14 +3,13 @@
 """
 
 from dataclasses import dataclass
-import logging
 import os
 import re
 from typing import Dict, List, Optional, Tuple
 
-from ..shared import UnsafePathError, quote_shell_path, sanitize_relative_path
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
+from ..shared import UnsafePathError, quote_shell_path, sanitize_relative_path
 
 
 @dataclass

@@ -22,13 +22,19 @@ jobs:
       - name: Ruff
         run: |
           ruff format --check .
-          ruff check __init__.py main.py artifacts entrypoints runtime shared tests workflow/engine.py orchestrator/code_extractor.py orchestrator/meta_orchestrator.py orchestrator/agent_coordinator.py orchestrator/core.py autonomous/skill_creator.py autonomous/mcp_configurator.py autonomous/executor.py sandbox/base.py sandbox/factory.py sandbox/local_sandbox.py sandbox/shipyard_sandbox.py
+          ruff check .
 
       - name: Mypy
-        run: mypy --follow-imports=skip shared/conditions.py shared/path_safety.py runtime/request_context.py runtime/pipeline.py runtime/container.py runtime/graph_state.py entrypoints/command_handlers.py artifacts/service.py
+        run: >-
+          mypy --follow-imports=skip
+          shared/conditions.py shared/path_safety.py
+          runtime/request_context.py runtime/container.py
+          entrypoints/command_handlers.py artifacts/service.py
+          orchestrator/agent_runner.py orchestrator/dynamic_agent_manager.py
+          tools
 
       - name: Bandit
-        run: bandit -q -r artifacts entrypoints runtime shared sandbox workflow
+        run: bandit -q -r artifacts entrypoints runtime shared sandbox tools workflow
 
       - name: Pytest
         run: |

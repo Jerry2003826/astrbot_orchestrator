@@ -1,10 +1,3 @@
-# AstrBot 动态智能体编排器依赖
-
-# 核心依赖（由 AstrBot 提供）
-# pyyaml - 工作流定义解析
-
-# 可选依赖
-# aiofiles>=23.0.0  # 异步文件操作
-
-# 注意：AstrBot 核心功能（如 llm_generate、SkillManager、MCPClient）
-# 由 AstrBot 主程序提供，无需单独安装
+# AstrBot 安装插件时会自动安装本文件中的依赖
+aiohttp>=3.9,<4
+PyYAML>=6.0,<7

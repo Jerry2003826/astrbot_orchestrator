@@ -163,19 +163,4 @@ async def test_plugin_manager_non_empty_fetch_is_cached(
     assert manager._cache_valid is True, "非空结果应标记 cache valid"
 
 
-# ─────────────────────────────────────────────────────────────────
-# Bug V: SkillLoader 的 _skills_cache 空结果不缓存
-# ─────────────────────────────────────────────────────────────────
-
-
-def test_skill_loader_source_conditionally_caches() -> None:
-    """静态检查 skill_loader.py 的 list_skills 只在非空时缓存。"""
-    from astrbot_orchestrator_v5.orchestrator import skill_loader
-
-    src = inspect.getsource(skill_loader)
-    # 搜索 "self._skills_cache = skills" 上下文,确认紧跟的 cache_valid 赋值有条件
-    assert "self._skills_cache = skills" in src
-    # 确认不是无条件设置 True
-    idx = src.find("self._skills_cache = skills")
-    following = src[idx : idx + 400]
-    assert "if skills" in following, f"skill_loader 未对空 skills 做条件缓存:\n{following}"
+# Bug V（SkillLoader 缓存）已随缓存机制删除：skill_loader 现直连官方 SkillManager。

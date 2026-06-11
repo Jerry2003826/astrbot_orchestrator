@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 
@@ -97,85 +97,5 @@ async def test_aexec_timeout_cleans_up_process_handle() -> None:
     assert proc.returncode is not None, "超时后子进程未被回收,returncode 仍为 None"
 
 
-# ─────────────────────────────────────────────────────────────────
-# Bug X: MCPBridge 空结果不应永久缓存
-# ─────────────────────────────────────────────────────────────────
-
-
-class _NoMcpToolManager:
-    """模拟 FunctionToolManager 已存在但尚未加载任何 MCP 客户端。"""
-
-    func_list: List[Any] = []
-    mcp_client_dict: Dict[str, Any] = {}
-
-
-def _make_context_with_tool_manager(manager: Any) -> Any:
-    class _Ctx:
-        def get_llm_tool_manager(self) -> Any:
-            return manager
-
-    return _Ctx()
-
-
-def test_mcp_bridge_empty_result_not_cached() -> None:
-    """FunctionToolManager 尚未就绪时,空结果不应让本会话被永久冻结。"""
-    from astrbot_orchestrator_v5.orchestrator.mcp_bridge import MCPBridge
-
-    bridge = MCPBridge(context=_make_context_with_tool_manager(_NoMcpToolManager()))
-
-    first = bridge.list_tools()
-    assert first == [], f"期望空列表,实际: {first}"
-    assert bridge._cache_valid is False, "空结果不应标记缓存有效"
-
-
-def test_mcp_bridge_non_empty_result_is_cached() -> None:
-    """一旦获取到任何工具或服务器信息,就应正常缓存。"""
-    from astrbot_orchestrator_v5.orchestrator.mcp_bridge import MCPBridge
-
-    class _FakeMcpTool:
-        name = "alpha"
-        description = "desc"
-        inputSchema: Dict[str, Any] = {}
-
-    class _FakeClient:
-        active = True
-        tools = [_FakeMcpTool()]
-
-    class _FakeToolManager:
-        func_list: List[Any] = []
-        mcp_client_dict = {"server-a": _FakeClient()}
-
-    bridge = MCPBridge(context=_make_context_with_tool_manager(_FakeToolManager()))
-
-    tools = bridge.list_tools()
-    assert tools and tools[0]["name"] == "alpha"
-    assert bridge._cache_valid is True, "非空结果应标记缓存有效"
-
-
-def test_mcp_bridge_source_conditionally_caches() -> None:
-    """静态检查 list_tools 只在非空时设置 cache_valid。"""
-    from astrbot_orchestrator_v5.orchestrator import mcp_bridge
-
-    src = inspect.getsource(mcp_bridge)
-    idx = src.find("self._tools_cache = tools")
-    assert idx != -1
-    following = src[idx : idx + 400]
-    assert "self._cache_valid = True" in following
-    # 必须有 if 守卫,而不是无条件置 True
-    assert "if tools or servers_info" in following, f"mcp_bridge 未对空结果做条件缓存:\n{following}"
-
-
-# ─────────────────────────────────────────────────────────────────
-# Bug Y: _extract_tools_from_mcp_clients 返回值类型注解
-# ─────────────────────────────────────────────────────────────────
-
-
-def test_extract_tools_signature_returns_tuple() -> None:
-    """方法实际返回 (tools, servers_info) 元组,注解必须同步。"""
-    from astrbot_orchestrator_v5.orchestrator.mcp_bridge import MCPBridge
-
-    sig = inspect.signature(MCPBridge._extract_tools_from_mcp_clients)
-    annotation = str(sig.return_annotation)
-    assert "tuple" in annotation.lower() or "Tuple" in annotation, (
-        f"返回值注解应为 tuple,实际: {annotation}"
-    )
+# Bug X/Y（MCPBridge 缓存与 _extract_tools 注解）已随缓存机制删除：
+# mcp_bridge 现直连官方 get_llm_tool_manager().mcp_client_dict，无缓存层。

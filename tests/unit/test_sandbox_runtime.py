@@ -154,23 +154,23 @@ class BrokenFixer:
 
 
 @pytest.mark.parametrize(
-    ("inside_sandbox", "run_mode", "expected"),
+    ("inside_sandbox", "runtime_mode", "expected"),
     [
-        (True, "sandbox", "local"),
+        (True, "shipyard_neo", "local"),
         (False, "local", "local"),
         (False, "none", "local"),
-        (False, "sandbox", "shipyard"),
+        (False, "shipyard_neo", "shipyard"),
     ],
 )
 def test_sandbox_runtime_detect_mode_uses_host_and_config(
     inside_sandbox: bool,
-    run_mode: str,
+    runtime_mode: str,
     expected: str,
 ) -> None:
-    """应综合宿主环境与配置推断沙盒模式。"""
+    """应综合宿主环境与 provider_settings.computer_use_runtime 推断沙盒模式。"""
 
     runtime = SandboxRuntime(
-        context=FakeContext({"computer_use": {"run_mode": run_mode}}),
+        context=FakeContext({"provider_settings": {"computer_use_runtime": runtime_mode}}),
         config={},
         inside_sandbox_detector=lambda: inside_sandbox,
     )

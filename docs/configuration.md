@@ -1,23 +1,21 @@
 # 配置说明
 
-`astrbot_orchestrator_v5` 的配置由根目录的 [`_conf_schema.json`](../_conf_schema.json) 定义，并由 `AstrBot` 插件配置面板暴露给用户。
+配置由根目录 [`_conf_schema.json`](../_conf_schema.json) 定义，经 `AstrBot` 插件配置面板暴露。
 
-如果你希望快速启用一套安全、可用、适合日常开发的配置，推荐先从下面这个最小集合开始：
+推荐起点（默认值即安全可用）：
 
 ```json
 {
-  "llm_provider": "your_provider_id",
+  "llm_provider": "",
   "max_iterations": 10,
-  "max_parallel_tasks": 3,
   "task_timeout": 120,
-  "enable_dynamic_agents": true,
-  "max_concurrent_agents": 5,
-  "agent_timeout": 300,
-  "force_subagents_for_complex_tasks": true,
   "enable_plugin_management": true,
   "enable_skill_creation": true,
   "enable_mcp_config": true,
   "enable_code_execution": true,
+  "enable_self_debug": true,
+  "enable_workflows": true,
+  "enable_dynamic_agents": true,
   "auto_fix_sandbox": true,
   "allow_local_fallback": false
 }
@@ -25,115 +23,73 @@
 
 ## 配置分组
 
-### 1. LLM 与主编排
+### 1. LLM 与 /agent 执行
 
 | 配置项 | 类型 / 默认值 | 说明 |
 | --- | --- | --- |
-| `llm_provider` | `string` / 无默认值 | 选择用于意图识别、任务分析、代码生成和总结的模型提供商 |
-| `max_iterations` | `int` / `10` | 单次自主执行允许的最大步骤数，用于阻止循环型任务失控 |
-| `max_parallel_tasks` | `int` / `3` | 主编排链路下并行执行任务的上限 |
-| `task_timeout` | `int` / `120` | 单个任务的超时时间，单位为秒 |
+| `llm_provider` | `string` / `""` | `/agent` 使用的模型提供商；留空则跟随会话当前聊天模型 |
+| `max_iterations` | `int` / `10` | 传给官方 `tool_loop_agent` 的 `max_steps`，防止工具循环失控 |
+| `task_timeout` | `int` / `120` | 单个 `/agent` 任务的整体超时（秒） |
 
-### 2. 动态 SubAgent 编排
+### 2. 能力开关（控制 FunctionTool 注册）
+
+| 配置项 | 默认值 | 控制的工具组 |
+| --- | --- | --- |
+| `enable_plugin_management` | `true` | `plugin_search/list/install/uninstall/update` |
+| `enable_skill_creation` | `true` | `skill_list/read/create/delete` |
+| `enable_mcp_config` | `true` | `mcp_list/add/remove/test/list_tools` |
+| `enable_code_execution` | `true` | `sandbox_exec_python/bash`、`sandbox_file_read/write`、`sandbox_install_packages` |
+| `enable_self_debug` | `true` | `debug_status/debug_recent_errors` |
+| `enable_workflows` | `true` | `workflow_list/workflow_run` |
+
+说明：
+
+- 关闭某组开关后，对应工具不会注册给宿主 Agent，同名命令入口也会提示能力未启用。
+- 高危工具（安装、写文件、执行代码等）内置管理员门控，与开关独立生效。
+
+### 3. 子代理
 
 | 配置项 | 类型 / 默认值 | 说明 |
 | --- | --- | --- |
-| `enable_dynamic_agents` | `bool` / `true` | 是否启用动态 `SubAgent` 协作 |
-| `max_concurrent_agents` | `int` / `5` | 动态代理的最大并发数 |
-| `agent_timeout` | `int` / `300` | 单个 `SubAgent` 任务的超时时间，单位为秒 |
-| `auto_cleanup_agents` | `bool` / `true` | 任务完成后是否自动清理动态代理 |
-| `use_llm_task_analyzer` | `bool` / `true` | 是否启用基于 LLM 的任务分析与计划生成 |
-| `force_subagents_for_complex_tasks` | `bool` / `true` | 对复杂任务强制使用多代理编排 |
-| `subagent_verbose_logs` | `bool` / `false` | 是否输出更详细的 `SubAgent` 执行日志 |
-| `subagent_template_overrides` | `string` / `""` | 以 JSON 字符串形式覆盖默认 `SubAgent` 模板 |
+| `enable_dynamic_agents` | `bool` / `true` | 插件启动时把预设模板写入宿主 `subagent_orchestrator` 配置并热加载 |
 
-### 3. 副作用能力开关
-
-| 配置项 | 类型 / 默认值 | 说明 |
-| --- | --- | --- |
-| `enable_plugin_management` | `bool` / `true` | 允许搜索、安装、卸载、更新插件 |
-| `enable_skill_creation` | `bool` / `true` | 允许创建和编辑 `SKILL.md` |
-| `enable_mcp_config` | `bool` / `true` | 允许配置和测试 MCP 服务 |
-| `enable_code_execution` | `bool` / `true` | 允许执行命令和代码 |
-
-这些能力都属于高风险副作用，应与宿主侧权限控制一起使用。
+子代理的并发、超时、路由等行为由宿主官方 `subagent_orchestrator` 配置控制（AstrBot WebUI → 配置），不再由本插件重复管理。也可随时用 `/agent sync` 手动同步模板。
 
 ### 4. 执行环境与安全策略
 
 | 配置项 | 类型 / 默认值 | 说明 |
 | --- | --- | --- |
-| `auto_fix_sandbox` | `bool` / `true` | 允许在检测到沙盒环境问题时尝试自动修复 |
-| `allow_local_fallback` | `bool` / `false` | 沙盒失败时是否允许回退到本地执行 |
+| `auto_fix_sandbox` | `bool` / `true` | 检测到沙盒环境问题时尝试自动修复（拉镜像、建网络） |
+| `allow_local_fallback` | `bool` / `false` | Shipyard 沙盒不可用时是否回退本地执行 |
 
-其中 `allow_local_fallback` 默认关闭，这是一个非常重要的安全选择：
+`allow_local_fallback` 默认关闭：
 
-- 关闭时：`Shipyard` 沙盒不可用会直接失败，不会静默切到本地执行
-- 开启时：可以提高任务可用性，但必须接受更高的本地执行风险
+- 关闭时：沙盒不可用直接失败，不会静默切到本地执行。
+- 开启时：可用性更高，但必须接受本地执行风险。
 
-### 5. 可观测性与调试
+沙盒模式（local/shipyard）跟随宿主全局配置 `provider_settings.computer_use_runtime`，本插件不再单独配置。
+
+### 5. 调试
 
 | 配置项 | 类型 / 默认值 | 说明 |
 | --- | --- | --- |
-| `show_thinking_process` | `bool` / `true` | 是否在回复中展示模型的思考与决策过程 |
-| `debug_mode` | `bool` / `false` | 是否在控制台输出更详细的调试日志 |
+| `debug_mode` | `bool` / `false` | 控制台输出详细执行日志 |
 
-## `subagent_template_overrides` 示例
+## 自 v4.0 移除的配置项
 
-该配置项用于覆写默认的动态代理模板。它是一个 JSON 字符串，而不是 YAML 或 Python 对象。
+以下配置项随自研编排层一起删除，升级后无需迁移（残留值会被忽略）：
 
-示例：
+`enable_natural_language_control`、`natural_language_router_scope`、`max_parallel_tasks`、`max_concurrent_agents`、`agent_timeout`、`auto_cleanup_agents`、`use_llm_task_analyzer`、`force_subagents_for_complex_tasks`、`subagent_template_overrides`、`subagent_verbose_logs`、`show_thinking_process`
 
-```json
-{
-  "code": {
-    "name": "code_agent",
-    "system_prompt": "你是资深代码工程师，负责输出完整、可运行的代码。",
-    "public_description": "生成或修改代码实现的子代理",
-    "tools": ["sandbox", "skill_gen"]
-  },
-  "research": {
-    "name": "research_agent",
-    "system_prompt": "你是信息分析专家，负责梳理需求、总结方案与风险。",
-    "public_description": "分析需求和风险的子代理",
-    "tools": []
-  }
-}
-```
-
-在配置面板中填写时，需要把它作为单行 JSON 字符串输入。
-
-## 推荐起点
-
-### 更偏开发体验
-
-- `enable_dynamic_agents = true`
-- `use_llm_task_analyzer = true`
-- `auto_fix_sandbox = true`
-- `show_thinking_process = true`
-- `debug_mode = false`
-
-### 更偏生产安全
-
-- `force_subagents_for_complex_tasks = true`
-- `allow_local_fallback = false`
-- `show_thinking_process = false`
-- `debug_mode = false`
-- 对高风险能力继续交由宿主侧权限矩阵控制
+子代理模板如需定制，直接在 AstrBot WebUI 的 `subagent_orchestrator` 配置中修改（`/agent sync` 写入的条目带 `orchestrator_v5_` 前缀标识）。
 
 ## 排查建议
 
-如果遇到以下问题，可以优先检查对应配置：
-
-- `任务执行过早中止`
-  检查 `max_iterations`、`task_timeout`、`agent_timeout`
-- `复杂任务没有走 SubAgent`
-  检查 `enable_dynamic_agents` 与 `force_subagents_for_complex_tasks`
-- `执行环境异常`
-  检查 `auto_fix_sandbox` 和宿主沙盒配置
-- `沙盒失败后仍希望继续`
-  明确评估是否要启用 `allow_local_fallback`
-- `日志太多或太少`
-  调整 `show_thinking_process`、`debug_mode`、`subagent_verbose_logs`
+- `任务执行过早中止`：检查 `max_iterations`、`task_timeout`
+- `LLM 不调用插件工具`：确认对应 `enable_*` 开关已开、触发者具备管理员身份（高危工具）
+- `子代理不生效`：执行 `/agent sync`，再用 `/agent status` 查看官方 handoffs 状态
+- `执行环境异常`：检查宿主 `provider_settings.computer_use_runtime` 与 `auto_fix_sandbox`
+- `沙盒失败后仍希望继续`：明确评估是否启用 `allow_local_fallback`
 
 ## 相关文档
 
