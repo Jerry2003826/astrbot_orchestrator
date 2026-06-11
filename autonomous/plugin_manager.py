@@ -28,6 +28,24 @@ GITHUB_PROXIES = [
 ]
 
 
+def apply_github_proxy(url: str, proxy: str) -> str:
+    """将 gh-proxy 系前缀式加速应用到完整目标 URL。
+
+    说明：此类镜像的形式是 ``https://proxy.example/<完整目标URL>``，
+    目标 URL 整体作为路径附加，因此不能使用 ``urllib.parse.urljoin``
+    （urljoin 遇到绝对 URL 会丢弃 base）。这里统一做合法性校验与
+    斜杠规范化，避免手工拼接出错。
+    """
+
+    proxy = proxy.strip()
+    if not proxy:
+        return url
+    if not proxy.startswith(("https://", "http://")):
+        logger.warning(f"忽略非法 GitHub 代理配置: {proxy!r}")
+        return url
+    return f"{proxy.rstrip('/')}/{url.lstrip('/')}"
+
+
 class PluginManagerTool:
     """
     插件市场管理工具
@@ -82,10 +100,9 @@ class PluginManagerTool:
                             )
                 except Exception:
                     # 尝试备用源
-                    proxy = self._get_github_proxy()
-                    fallback_url = PLUGIN_REGISTRY_FALLBACK
-                    if proxy:
-                        fallback_url = f"{proxy.rstrip('/')}/{fallback_url}"
+                    fallback_url = apply_github_proxy(
+                        PLUGIN_REGISTRY_FALLBACK, self._get_github_proxy()
+                    )
 
                     async with session.get(
                         fallback_url, timeout=aiohttp.ClientTimeout(total=10)

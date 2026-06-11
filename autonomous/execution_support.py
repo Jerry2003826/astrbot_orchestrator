@@ -4,20 +4,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+import re
 from typing import Sequence
 
 from ..sandbox import ExecResult, SandboxFile
 from ..shared import quote_shell_path
 
+# 正则黑名单：覆盖空白/参数顺序/通配符等常见绕过变体（如 rm -fr /、rm -r -f /*）。
+# 仅为第一道防线，真正的隔离由沙盒运行时保证。
 DEFAULT_DANGEROUS_PATTERNS: tuple[str, ...] = (
-    "rm -rf /",
-    "mkfs",
-    "dd if=",
-    "> /dev/",
-    "sudo rm",
-    "chmod 777 /",
-    "curl | sh",
-    "wget | sh",
+    # rm 递归/强制删除根路径及关键系统目录（含 -rf/-fr/-r -f、/*、引号包裹等变体）
+    r"\brm\s+(?:-+[a-z]+\s+)*-+[a-z]*[rf][a-z]*\s+(?:-+[a-z]+\s+)*['\"]?/"
+    r"(?:\*|\s|$|['\"]|bin|boot|dev|etc|home|lib|proc|root|sbin|srv|sys|usr|var)",
+    r"\bsudo\s+rm\b",
+    # 格式化文件系统
+    r"\bmkfs(?:\.[a-z0-9]+)?\b",
+    # dd 直接读写块设备
+    r"\bdd\s+[^|;&]*\b(?:if|of)=\s*/dev/(?:sd|hd|nvme|vd|xvd|mmcblk)",
+    # 重定向覆盖块设备
+    r">\s*/dev/(?:sd|hd|nvme|vd|xvd|mmcblk)",
+    # 全局 777
+    r"\bchmod\s+(?:-+[a-z]+\s+)*0?777\s+/(?:\s|$|['\"]|[a-z])",
+    # 远程脚本管道直执行（curl/wget | sh/bash/zsh/dash/ksh）
+    r"\b(?:curl|wget)\b[^|;&]*\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b",
+    # fork bomb
+    r":\s*\(\s*\)\s*\{[^}]*\|[^}]*&[^}]*\}\s*;?\s*:",
 )
 
 
@@ -28,10 +39,10 @@ class ExecutionCommandPolicy:
     dangerous_patterns: tuple[str, ...] = DEFAULT_DANGEROUS_PATTERNS
 
     def is_dangerous(self, code: str) -> bool:
-        """判断命令是否命中危险模式。"""
+        """判断命令是否命中危险模式（正则匹配，忽略大小写）。"""
 
         lowered = code.lower()
-        return any(pattern in lowered for pattern in self.dangerous_patterns)
+        return any(re.search(pattern, lowered) for pattern in self.dangerous_patterns)
 
     def build_web_server_command(self, project_path: str, port: int, framework: str) -> str:
         """生成启动 Web 服务的 shell 命令。"""

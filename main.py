@@ -107,7 +107,7 @@ class OrchestratorPlugin(Star):
     # /plugin
     # ==================================================================
     @filter.command_group("plugin")
-    def plugin_group(self):
+    def plugin_group(self, event: AstrMessageEvent):
         """插件管理指令组"""
 
     @plugin_group.command("search")
@@ -167,7 +167,7 @@ class OrchestratorPlugin(Star):
     # /skill
     # ==================================================================
     @filter.command_group("skill")
-    def skill_group(self):
+    def skill_group(self, event: AstrMessageEvent):
         """Skill 管理指令组"""
 
     @filter.permission_type(ADMIN)
@@ -211,7 +211,7 @@ class OrchestratorPlugin(Star):
     # /mcp（管理员）
     # ==================================================================
     @filter.command_group("mcp")
-    def mcp_group(self):
+    def mcp_group(self, event: AstrMessageEvent):
         """MCP 服务器管理指令组"""
 
     @filter.permission_type(ADMIN)
@@ -260,7 +260,7 @@ class OrchestratorPlugin(Star):
     # /exec（管理员）
     # ==================================================================
     @filter.command_group("exec")
-    def exec_group(self):
+    def exec_group(self, event: AstrMessageEvent):
         """快速执行指令组"""
 
     @filter.permission_type(ADMIN)
@@ -315,7 +315,7 @@ class OrchestratorPlugin(Star):
     # /sandbox（管理员）
     # ==================================================================
     @filter.command_group("sandbox")
-    def sandbox_group(self):
+    def sandbox_group(self, event: AstrMessageEvent):
         """沙盒管理指令组"""
 
     @filter.permission_type(ADMIN)
@@ -434,7 +434,7 @@ class OrchestratorPlugin(Star):
     # /debug（管理员）
     # ==================================================================
     @filter.command_group("debug")
-    def debug_group(self):
+    def debug_group(self, event: AstrMessageEvent):
         """诊断指令组"""
 
     @filter.permission_type(ADMIN)

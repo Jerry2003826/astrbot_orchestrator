@@ -9,11 +9,15 @@ Skill 创建/管理工具
 
 import os
 from pathlib import Path
+import re
 from typing import Any, cast
 
 from astrbot.api import logger
 
 from ..shared import ensure_within_base, slugify_identifier
+
+# 非贪婪匹配第一个围栏代码块；语言标记与收尾围栏缺失时由调用方回退处理
+_FENCED_BLOCK_RE = re.compile(r"```(?P<lang>[\w-]*)[ \t]*\n(?P<body>.*?)```", re.DOTALL)
 
 
 class SkillCreatorTool:
@@ -26,6 +30,32 @@ class SkillCreatorTool:
     def __init__(self, context: Any) -> None:
         self.context = context
         self._skill_manager: Any | None = None
+
+    @staticmethod
+    def _extract_markdown_block(content: str) -> str:
+        """从 LLM 响应中安全提取 Markdown 正文。
+
+        优先取第一个围栏代码块（``` 或 ```markdown）；围栏不规范（单行、
+        缺收尾）或没有代码块时逐级回退，绝不抛 IndexError。
+        """
+
+        match = _FENCED_BLOCK_RE.search(content)
+        if match:
+            return match.group("body").strip()
+
+        stripped = content.strip()
+
+        # 单行围栏（```# 内容```）：剥两端围栏
+        if stripped.startswith("```") and stripped.endswith("```") and len(stripped) > 6:
+            return stripped[3:-3].strip()
+
+        # 只有开头围栏没有收尾围栏：剥掉首行围栏标记，保留剩余内容
+        if stripped.startswith("```"):
+            first_newline = stripped.find("\n")
+            if first_newline != -1:
+                return stripped[first_newline + 1 :].strip()
+
+        return stripped
 
     def _get_skill_manager(self) -> Any | None:
         """获取 AstrBot 的 SkillManager"""
@@ -250,19 +280,7 @@ description: 简短的功能描述
             )
 
             content = cast(str, response.completion_text)
-
-            # 提取 Markdown 内容
-            if "```markdown" in content:
-                content = content.split("```markdown")[1].split("```")[0]
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0]
-                if "\n" in content:
-                    first_line, remainder = content.split("\n", 1)
-                    normalized = first_line.strip().replace("-", "").replace("_", "")
-                    if first_line.strip() and normalized.isalnum():
-                        content = remainder
-
-            return content.strip()
+            return self._extract_markdown_block(content)
 
         except Exception as e:
             logger.error(f"生成 Skill 内容失败: {e}")

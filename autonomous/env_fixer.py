@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from contextlib import suppress
 
 from astrbot.api import logger
 
@@ -17,6 +18,9 @@ class EnvironmentFixer:
         "ship:latest": "soulter/shipyard-ship:latest",
         "shipyard-bay:latest": "soulter/shipyard-bay:latest",
     }
+
+    # docker pull 可能很慢，给足余量；其余命令远小于该值
+    CMD_TIMEOUT_SECONDS: float = 300.0
 
     async def check_and_fix_environment(self, error_msg: str) -> tuple[bool, str]:
         """根据错误信息尝试自动修复沙盒环境"""
@@ -67,18 +71,28 @@ class EnvironmentFixer:
         await asyncio.sleep(5)
         return True, "已等待 ship 容器启动"
 
-    async def _run_cmd(self, cmd: Sequence[str]) -> str:
-        """执行命令并返回合并后的标准输出/错误输出。"""
+    async def _run_cmd(self, cmd: Sequence[str], timeout: float | None = None) -> str:
+        """执行命令并返回合并后的标准输出/错误输出（超时自动终止进程）。"""
 
+        effective_timeout = timeout if timeout is not None else self.CMD_TIMEOUT_SECONDS
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=effective_timeout)
             output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
             return output.strip()
+        except asyncio.TimeoutError:
+            logger.warning("执行命令超时(%ss): %s", effective_timeout, " ".join(cmd))
+            if proc is not None:
+                with suppress(ProcessLookupError):
+                    proc.kill()
+                with suppress(Exception):
+                    await proc.wait()
+            return ""
         except Exception as e:
             logger.warning("执行命令失败: %s", e)
             return ""
