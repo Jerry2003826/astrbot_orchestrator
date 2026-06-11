@@ -264,7 +264,8 @@ def test_mcp_configurator_get_mcp_config_path_falls_back_to_data_dir(
         ("https://8.8.8.8/mcp", ["8.8.8.8"]),
     ],
 )
-def test_mcp_configurator_validate_server_url_accepts_public_https(
+@pytest.mark.asyncio
+async def test_mcp_configurator_validate_server_url_accepts_public_https(
     url: str,
     resolved_hosts: list[str],
     monkeypatch: "MonkeyPatch",
@@ -274,11 +275,11 @@ def test_mcp_configurator_validate_server_url_accepts_public_https(
     monkeypatch.setattr(
         mcp_module.socket,
         "getaddrinfo",
-        lambda host, port, type=socket.SOCK_STREAM: [
+        lambda host, port, *args, type=socket.SOCK_STREAM, **kwargs: [
             (socket.AF_INET, type, 6, "", (ip, port)) for ip in resolved_hosts
         ],
     )
-    MCPConfiguratorTool._validate_server_url(url)
+    await MCPConfiguratorTool._validate_server_url(url)
 
 
 @pytest.mark.parametrize(
@@ -293,7 +294,8 @@ def test_mcp_configurator_validate_server_url_accepts_public_https(
         ("https://internal.example/api", "拒绝私网、环回或保留地址", ["127.0.0.1"]),
     ],
 )
-def test_mcp_configurator_validate_server_url_rejects_unsafe_targets(
+@pytest.mark.asyncio
+async def test_mcp_configurator_validate_server_url_rejects_unsafe_targets(
     url: str,
     message: str,
     resolved_hosts: list[str],
@@ -304,27 +306,27 @@ def test_mcp_configurator_validate_server_url_rejects_unsafe_targets(
     monkeypatch.setattr(
         mcp_module.socket,
         "getaddrinfo",
-        lambda host, port, type=socket.SOCK_STREAM: [
+        lambda host, port, *args, type=socket.SOCK_STREAM, **kwargs: [
             (socket.AF_INET, type, 6, "", (ip, port)) for ip in resolved_hosts
         ],
     )
     with pytest.raises(ValueError, match=message):
-        MCPConfiguratorTool._validate_server_url(url)
+        await MCPConfiguratorTool._validate_server_url(url)
 
 
-def test_mcp_configurator_validate_server_url_rejects_unresolvable_hostname(
+@pytest.mark.asyncio
+async def test_mcp_configurator_validate_server_url_rejects_unresolvable_hostname(
     monkeypatch: "MonkeyPatch",
 ) -> None:
     """无法解析的主机名应被视为不安全目标。"""
 
-    def fail_lookup(host: str, port: int, type: int = socket.SOCK_STREAM) -> list[Any]:
-        del host, port, type
+    def fail_lookup(*args: Any, **kwargs: Any) -> list[Any]:
         raise socket.gaierror("dns failed")
 
     monkeypatch.setattr(mcp_module.socket, "getaddrinfo", fail_lookup)
 
     with pytest.raises(ValueError, match="主机名无法解析"):
-        MCPConfiguratorTool._validate_server_url("https://missing.example/api")
+        await MCPConfiguratorTool._validate_server_url("https://missing.example/api")
 
 
 def test_mcp_configurator_load_and_save_config_handles_missing_and_invalid_json(
@@ -436,7 +438,7 @@ async def test_mcp_configurator_add_server_success_persists_and_enables(
     monkeypatch.setattr(
         mcp_module.socket,
         "getaddrinfo",
-        lambda host, port, type=socket.SOCK_STREAM: [
+        lambda host, port, *args, type=socket.SOCK_STREAM, **kwargs: [
             (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
         ],
     )
@@ -477,7 +479,7 @@ async def test_mcp_configurator_add_server_rejects_raw_sensitive_headers(
     monkeypatch.setattr(
         mcp_module.socket,
         "getaddrinfo",
-        lambda host, port, type=socket.SOCK_STREAM: [
+        lambda host, port, *args, type=socket.SOCK_STREAM, **kwargs: [
             (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
         ],
     )
@@ -505,7 +507,7 @@ async def test_mcp_configurator_add_server_handles_duplicate_enable_failure_and_
     monkeypatch.setattr(
         mcp_module.socket,
         "getaddrinfo",
-        lambda host, port, type=socket.SOCK_STREAM: [
+        lambda host, port, *args, type=socket.SOCK_STREAM, **kwargs: [
             (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
         ],
     )
@@ -538,7 +540,7 @@ async def test_mcp_configurator_add_server_skips_enable_when_tool_manager_unavai
     monkeypatch.setattr(
         mcp_module.socket,
         "getaddrinfo",
-        lambda host, port, type=socket.SOCK_STREAM: [
+        lambda host, port, *args, type=socket.SOCK_STREAM, **kwargs: [
             (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
         ],
     )
@@ -663,7 +665,7 @@ async def test_mcp_configurator_test_server_covers_streamable_http_and_sse_paths
     monkeypatch.setattr(
         mcp_module.socket,
         "getaddrinfo",
-        lambda host, port, type=socket.SOCK_STREAM: [
+        lambda host, port, *args, type=socket.SOCK_STREAM, **kwargs: [
             (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
         ],
     )
@@ -719,7 +721,7 @@ async def test_mcp_configurator_test_server_covers_remaining_status_branches(
     monkeypatch.setattr(
         mcp_module.socket,
         "getaddrinfo",
-        lambda host, port, type=socket.SOCK_STREAM: [
+        lambda host, port, *args, type=socket.SOCK_STREAM, **kwargs: [
             (socket.AF_INET, type, 6, "", ("93.184.216.34", port))
         ],
     )

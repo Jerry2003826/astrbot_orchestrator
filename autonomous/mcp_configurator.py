@@ -59,8 +59,8 @@ class MCPConfiguratorTool:
         return os.path.join(get_astrbot_data_path(), "mcp_server.json")
 
     @staticmethod
-    def _validate_server_url(url: str) -> None:
-        """校验 MCP 服务 URL，拒绝不安全目标。"""
+    async def _validate_server_url(url: str) -> None:
+        """校验 MCP 服务 URL，拒绝不安全目标（DNS 解析走事件循环，不阻塞）。"""
 
         parsed = urlparse(url)
         if parsed.scheme != "https":
@@ -73,10 +73,10 @@ class MCPConfiguratorTool:
             raise ValueError("拒绝本地或局域网主机")
         port = parsed.port or 443
 
+        loop = asyncio.get_running_loop()
         try:
-            candidate_ips = {
-                item[4][0] for item in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-            }
+            info = await loop.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+            candidate_ips = {item[4][0] for item in info}
         except socket.gaierror as exc:
             raise ValueError(f"MCP 服务主机名无法解析: {hostname}") from exc
 
@@ -215,7 +215,7 @@ class MCPConfiguratorTool:
             if name in config.get("mcpServers", {}):
                 return f"❌ MCP 服务器 `{name}` 已存在，请使用其他名称"
 
-            self._validate_server_url(url)
+            await self._validate_server_url(url)
             stored_headers = self._normalize_headers_for_storage(headers)
             runtime_headers = self._resolve_runtime_headers(stored_headers)
 
@@ -288,7 +288,7 @@ class MCPConfiguratorTool:
         headers = self._resolve_runtime_headers(
             cast(dict[str, str], server_config.get("headers", {}))
         )
-        self._validate_server_url(url)
+        await self._validate_server_url(url)
 
         try:
             async with aiohttp.ClientSession() as session:
