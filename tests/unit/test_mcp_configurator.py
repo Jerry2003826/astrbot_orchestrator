@@ -333,7 +333,7 @@ def test_mcp_configurator_load_and_save_config_handles_missing_and_invalid_json(
     config_path: Path,
     monkeypatch: "MonkeyPatch",
 ) -> None:
-    """配置读写应支持首次创建，并在损坏 JSON 时回退默认值。"""
+    """配置读写应支持首次创建；损坏 JSON 时应备份原文件并抛错，防止覆盖丢失。"""
 
     tool = MCPConfiguratorTool(context=FakeContext())
     monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
@@ -356,7 +356,67 @@ def test_mcp_configurator_load_and_save_config_handles_missing_and_invalid_json(
 
     config_path.write_text("{broken json", encoding="utf-8")
 
-    assert tool._load_mcp_config() == {"mcpServers": {}}
+    with pytest.raises(RuntimeError, match="MCP 配置文件损坏"):
+        tool._load_mcp_config()
+
+    # 原始损坏内容必须已备份，且原文件未被改动
+    backups = list(config_path.parent.glob(f"{config_path.name}.bak.*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "{broken json"
+    assert config_path.read_text(encoding="utf-8") == "{broken json"
+    # 原子保存不应留下临时文件
+    assert not (config_path.parent / f"{config_path.name}.tmp").exists()
+
+
+def test_mcp_configurator_load_config_rejects_non_object_root(
+    config_path: Path,
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """合法 JSON 但根节点不是对象时也应按损坏配置处理。"""
+
+    tool = MCPConfiguratorTool(context=FakeContext())
+    monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="配置根节点应为对象"):
+        tool._load_mcp_config()
+
+
+def test_mcp_configurator_load_config_backup_failure_still_raises(
+    config_path: Path,
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """备份失败时仍必须抛错，绝不能回退为空配置。"""
+
+    tool = MCPConfiguratorTool(context=FakeContext())
+    monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{broken json", encoding="utf-8")
+
+    def fail_copy(*args: Any, **kwargs: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mcp_module.shutil, "copy2", fail_copy)
+
+    with pytest.raises(RuntimeError, match="自动备份失败"):
+        tool._load_mcp_config()
+
+
+@pytest.mark.asyncio
+async def test_mcp_configurator_list_and_test_server_report_corrupt_config(
+    config_path: Path,
+    monkeypatch: "MonkeyPatch",
+) -> None:
+    """损坏配置下 list_servers/test_server 应返回明确错误而非崩溃或静默。"""
+
+    tool = MCPConfiguratorTool(context=FakeContext(tool_manager=None))
+    monkeypatch.setattr(tool, "_get_mcp_config_path", lambda: str(config_path))
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{broken json", encoding="utf-8")
+
+    assert "❌ 读取 MCP 配置失败" in tool.list_servers()
+    assert (await tool.test_server("any")).startswith("❌ 读取 MCP 配置失败")
 
 
 def test_mcp_configurator_list_servers_renders_active_clients_and_configured_servers(

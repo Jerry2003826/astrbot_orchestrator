@@ -9,15 +9,11 @@ Skill 创建/管理工具
 
 import os
 from pathlib import Path
-import re
 from typing import Any, cast
 
 from astrbot.api import logger
 
 from ..shared import ensure_within_base, slugify_identifier
-
-# 非贪婪匹配第一个围栏代码块；语言标记与收尾围栏缺失时由调用方回退处理
-_FENCED_BLOCK_RE = re.compile(r"```(?P<lang>[\w-]*)[ \t]*\n(?P<body>.*?)```", re.DOTALL)
 
 
 class SkillCreatorTool:
@@ -35,27 +31,37 @@ class SkillCreatorTool:
     def _extract_markdown_block(content: str) -> str:
         """从 LLM 响应中安全提取 Markdown 正文。
 
-        优先取第一个围栏代码块（``` 或 ```markdown）；围栏不规范（单行、
-        缺收尾）或没有代码块时逐级回退，绝不抛 IndexError。
+        基于 ``str.find``/``str.rfind`` 切片实现（不依赖正则，规避超长
+        文本的回溯性能问题）：取第一个围栏到最后一个围栏之间的内容，
+        因此正文内部嵌套的代码块不会被截断；围栏不规范（单行、缺收尾）
+        或没有代码块时逐级回退，绝不抛 IndexError。
         """
-
-        match = _FENCED_BLOCK_RE.search(content)
-        if match:
-            return match.group("body").strip()
 
         stripped = content.strip()
 
-        # 单行围栏（```# 内容```）：剥两端围栏
-        if stripped.startswith("```") and stripped.endswith("```") and len(stripped) > 6:
-            return stripped[3:-3].strip()
+        open_pos = stripped.find("```")
+        if open_pos == -1:
+            return stripped
 
-        # 只有开头围栏没有收尾围栏：剥掉首行围栏标记，保留剩余内容
-        if stripped.startswith("```"):
-            first_newline = stripped.find("\n")
-            if first_newline != -1:
-                return stripped[first_newline + 1 :].strip()
+        after_open = open_pos + 3
+        newline_pos = stripped.find("\n", after_open)
+        next_fence_pos = stripped.find("```", after_open)
 
-        return stripped
+        if newline_pos != -1 and (next_fence_pos == -1 or newline_pos < next_fence_pos):
+            # 常规多行围栏：跳过语言标记行（```markdown 等）
+            body_start = newline_pos + 1
+        else:
+            # 单行围栏（```# 内容```）或紧跟收尾围栏
+            body_start = after_open
+
+        # close_pos == body_start 意味着 rfind 命中的是紧邻的收尾围栏（空代码块），
+        # 此时应返回空串而非把围栏当正文；命中开头围栏自身时 close_pos < body_start。
+        close_pos = stripped.rfind("```")
+        if close_pos >= body_start:
+            return stripped[body_start:close_pos].strip()
+
+        # 缺收尾围栏：保留围栏后的全部内容
+        return stripped[body_start:].strip()
 
     def _get_skill_manager(self) -> Any | None:
         """获取 AstrBot 的 SkillManager。

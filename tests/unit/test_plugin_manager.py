@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
 import pytest
 
 import astrbot_orchestrator_v5.autonomous.plugin_manager as plugin_module
@@ -181,9 +184,21 @@ class FakeHttpResponse:
         del exc_type, exc, tb
         return False
 
-    async def json(self) -> Any:
+    def raise_for_status(self) -> None:
+        """模拟 aiohttp 的状态码检查。"""
+
+        if self.status >= 400:
+            raise aiohttp.ClientResponseError(
+                request_info=None,  # type: ignore[arg-type]
+                history=(),
+                status=self.status,
+                message=f"HTTP {self.status}",
+            )
+
+    async def json(self, content_type: str | None = "application/json") -> Any:
         """返回预设 JSON 数据。"""
 
+        del content_type
         return self._json_data
 
 
@@ -293,16 +308,53 @@ async def test_plugin_manager_fetch_registry_falls_back_to_proxy_source(
     )
 
 
+@pytest.mark.parametrize(
+    ("exc", "expected_prefix"),
+    [
+        (asyncio.TimeoutError(), "请求超时"),
+        (
+            aiohttp.ClientConnectorError(
+                SimpleNamespace(host="registry.example", port=443, ssl=None),  # type: ignore[arg-type]
+                OSError("dns failure"),
+            ),
+            "连接失败",
+        ),
+        (
+            aiohttp.ClientResponseError(
+                request_info=None,  # type: ignore[arg-type]
+                history=(),
+                status=503,
+                message="Service Unavailable",
+            ),
+            "HTTP 错误 503",
+        ),
+        (aiohttp.ClientPayloadError("bad payload"), "网络请求异常"),
+        (json.JSONDecodeError("Expecting value", "doc", 0), "响应不是合法 JSON"),
+        (RuntimeError("boom"), "RuntimeError"),
+    ],
+)
+def test_plugin_manager_describe_fetch_error_covers_each_branch(
+    exc: Exception,
+    expected_prefix: str,
+) -> None:
+    """每类网络异常都应被翻译为可定位的原因描述。"""
+
+    assert PluginManagerTool._describe_fetch_error(exc).startswith(expected_prefix)
+
+
 @pytest.mark.asyncio
 async def test_plugin_manager_fetch_registry_handles_non_200_and_total_failure(
     monkeypatch: "MonkeyPatch",
 ) -> None:
-    """非 200 响应和备用源失败时应回退为空列表。"""
+    """非 200 响应应触发备用源重试，备用源也失败时回退为空列表。"""
 
     tool = PluginManagerTool(context=FakeContext())
 
     non_200_session = FakeClientSession(
-        get_results=[FakeHttpResponse(status=503, json_data={"stars": [{"name": "ignored"}]})]
+        get_results=[
+            FakeHttpResponse(status=503, json_data={"stars": [{"name": "ignored"}]}),
+            FakeHttpResponse(status=503, json_data=[]),
+        ]
     )
     monkeypatch.setattr(plugin_module.aiohttp, "ClientSession", lambda: non_200_session)
 
@@ -312,7 +364,8 @@ async def test_plugin_manager_fetch_registry_handles_non_200_and_total_failure(
     # Round 4 Bug U 修复：空结果不应被标记为缓存有效，
     # 以允许下次调用重试源，而不是本会话永久返回空列表。
     assert tool._cache_valid is False
-    assert len(non_200_session.get_calls) == 1
+    # 主源 503 后应继续尝试备用源
+    assert len(non_200_session.get_calls) == 2
 
     tool.invalidate_cache()
     failing_session = FakeClientSession(

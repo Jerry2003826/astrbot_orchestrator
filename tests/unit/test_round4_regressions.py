@@ -137,7 +137,11 @@ async def test_plugin_manager_non_empty_fetch_is_cached(
     class _FakeResp:
         status = 200
 
-        async def json(self) -> list[dict[str, Any]]:
+        def raise_for_status(self) -> None:
+            return None
+
+        async def json(self, content_type: str | None = "application/json") -> list[dict[str, Any]]:
+            del content_type
             return fake_plugins
 
         async def __aenter__(self) -> "_FakeResp":

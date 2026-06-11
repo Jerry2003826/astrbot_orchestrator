@@ -480,6 +480,9 @@ async def test_skill_creator_generate_skill_from_description_covers_all_formats(
             "  # Skill C  ",
             "```\n# Skill D\n```",
             "```# Skill E```",
+            "```markdown\n# Skill F\n## 示例\n```python\nprint(1)\n```\n```",
+            "```markdown\n# Skill G",
+            "```\n```",
         ]
     )
     tool = SkillCreatorTool(context=context)
@@ -509,12 +512,30 @@ async def test_skill_creator_generate_skill_from_description_covers_all_formats(
         "做一个单行 fenced Skill",
         "provider-e",
     )
+    nested_fence_result = await tool.generate_skill_from_description(
+        "Nested Skill",
+        "做一个内嵌代码块的 Skill",
+        "provider-f",
+    )
+    unclosed_fence_result = await tool.generate_skill_from_description(
+        "Unclosed Skill",
+        "做一个缺收尾围栏的 Skill",
+        "provider-g",
+    )
+    empty_block_result = await tool.generate_skill_from_description(
+        "Empty Skill",
+        "做一个空代码块的 Skill",
+        "provider-h",
+    )
 
     assert markdown_result == "# Skill A"
     assert generic_result == "# Skill B"
     assert plain_result == "# Skill C"
     assert blank_first_line_result == "# Skill D"
     assert inline_fence_result == "# Skill E"
+    assert nested_fence_result == "# Skill F\n## 示例\n```python\nprint(1)\n```"
+    assert unclosed_fence_result == "# Skill G"
+    assert empty_block_result == ""
     assert context.llm_calls[0]["chat_provider_id"] == "provider-a"
     assert "做一个日历 Skill" in context.llm_calls[0]["prompt"]
     assert context.llm_calls[0]["system_prompt"] == "你是一个专业的 AstrBot Skill 开发者。"

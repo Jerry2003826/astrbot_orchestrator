@@ -7,6 +7,8 @@
 - 查看已安装插件
 """
 
+import asyncio
+import json
 from typing import Any, cast
 
 import aiohttp
@@ -77,41 +79,72 @@ class PluginManagerTool:
         except Exception:
             return ""
 
+    @staticmethod
+    def _describe_fetch_error(exc: Exception) -> str:
+        """把抓取插件列表的异常翻译为可定位的原因描述。"""
+
+        if isinstance(exc, asyncio.TimeoutError):
+            return "请求超时"
+        if isinstance(exc, aiohttp.ClientConnectorError):
+            return f"连接失败（DNS/代理/网络）: {exc}"
+        if isinstance(exc, aiohttp.ClientResponseError):
+            return f"HTTP 错误 {exc.status}: {exc.message}"
+        if isinstance(exc, aiohttp.ClientError):
+            return f"网络请求异常: {exc}"
+        if isinstance(exc, json.JSONDecodeError):
+            return f"响应不是合法 JSON: {exc}"
+        return f"{type(exc).__name__}: {exc}"
+
     async def _fetch_plugin_registry(self) -> list[dict[str, Any]]:
-        """从插件市场获取插件列表"""
+        """从插件市场获取插件列表。
+
+        主源失败时回退备用源；两者都失败时返回空列表（上层据此提示），
+        并在日志中分别记录两个源各自的失败原因，便于排查网络/代理问题。
+        """
         if self._cache_valid:
             return self._plugin_cache
 
         plugins: list[dict[str, Any]] = []
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                # 尝试官方 API
-                try:
-                    async with session.get(
-                        PLUGIN_REGISTRY_URL, timeout=aiohttp.ClientTimeout(total=10)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            plugins = (
-                                data
-                                if isinstance(data, list)
-                                else data.get("plugins", data.get("stars", []))
-                            )
-                except Exception:
-                    # 尝试备用源
-                    fallback_url = apply_github_proxy(
-                        PLUGIN_REGISTRY_FALLBACK, self._get_github_proxy()
+        async with aiohttp.ClientSession() as session:
+            # 尝试官方 API
+            try:
+                async with session.get(
+                    PLUGIN_REGISTRY_URL, timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    plugins = (
+                        data
+                        if isinstance(data, list)
+                        else data.get("plugins", data.get("stars", []))
                     )
-
+            except Exception as primary_exc:
+                primary_reason = self._describe_fetch_error(primary_exc)
+                logger.warning(
+                    "插件市场主源 %s 获取失败（%s），尝试备用源",
+                    PLUGIN_REGISTRY_URL,
+                    primary_reason,
+                )
+                # 尝试备用源
+                fallback_url = apply_github_proxy(
+                    PLUGIN_REGISTRY_FALLBACK, self._get_github_proxy()
+                )
+                try:
                     async with session.get(
                         fallback_url, timeout=aiohttp.ClientTimeout(total=10)
                     ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            plugins = data if isinstance(data, list) else data.get("plugins", [])
-        except Exception as e:
-            logger.error(f"获取插件列表失败: {e}")
+                        resp.raise_for_status()
+                        data = await resp.json(content_type=None)
+                        plugins = data if isinstance(data, list) else data.get("plugins", [])
+                except Exception as fallback_exc:
+                    logger.error(
+                        "获取插件列表失败。主源 %s: %s；备用源 %s: %s",
+                        PLUGIN_REGISTRY_URL,
+                        primary_reason,
+                        fallback_url,
+                        self._describe_fetch_error(fallback_exc),
+                    )
 
         self._plugin_cache = plugins
         # 仅在成功获取到非空列表时才标记缓存有效，

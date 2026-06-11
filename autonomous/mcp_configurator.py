@@ -12,7 +12,9 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import socket
+import time
 from typing import Any, cast
 from urllib.parse import urlparse
 
@@ -137,26 +139,45 @@ class MCPConfiguratorTool:
         return resolved
 
     def _load_mcp_config(self) -> dict[str, Any]:
-        """加载 MCP 配置"""
+        """加载 MCP 配置。
+
+        配置文件存在但损坏/不可读时，先备份原文件再抛出异常，
+        绝不返回空字典——否则后续保存会把用户原有配置整体覆盖丢失。
+        """
         config_path = self._get_mcp_config_path()
 
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    return cast(dict[str, Any], json.load(f))
-            except Exception as exc:
-                logger.warning("加载 MCP 配置失败: %s", exc)
+        if not os.path.exists(config_path):
+            return {"mcpServers": {}}
 
-        return {"mcpServers": {}}
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError(f"配置根节点应为对象，实际为 {type(data).__name__}")
+            return cast(dict[str, Any], data)
+        except Exception as exc:
+            backup_path = f"{config_path}.bak.{int(time.time())}"
+            try:
+                shutil.copy2(config_path, backup_path)
+                logger.error("MCP 配置文件损坏，已备份到 %s: %s", backup_path, exc)
+                backup_note = f"已备份原文件到 {backup_path}，"
+            except OSError as backup_exc:
+                logger.error("MCP 配置文件损坏且备份失败(%s): %s", backup_exc, exc)
+                backup_note = "且自动备份失败，"
+            raise RuntimeError(
+                f"MCP 配置文件损坏或不可读，{backup_note}请人工检查 {config_path}（错误: {exc}）"
+            ) from exc
 
     def _save_mcp_config(self, config: dict[str, Any]) -> None:
-        """保存 MCP 配置"""
+        """保存 MCP 配置（先写临时文件再原子替换，避免写入中断损坏配置）。"""
         config_path = self._get_mcp_config_path()
 
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
-        with open(config_path, "w", encoding="utf-8") as f:
+        tmp_path = f"{config_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, config_path)
 
     def list_servers(self) -> str:
         """列出所有 MCP 服务器"""
@@ -177,7 +198,11 @@ class MCPConfiguratorTool:
                 lines.append("暂无活跃的 MCP 服务器")
 
         # 从配置文件获取
-        config = self._load_mcp_config()
+        try:
+            config = self._load_mcp_config()
+        except RuntimeError as exc:
+            lines.append(f"\n❌ 读取 MCP 配置失败: {exc}")
+            return "\n".join(lines)
         servers = config.get("mcpServers", {})
 
         if servers:
@@ -277,7 +302,10 @@ class MCPConfiguratorTool:
 
     async def test_server(self, name: str) -> str:
         """测试 MCP 服务器连接"""
-        config = self._load_mcp_config()
+        try:
+            config = self._load_mcp_config()
+        except RuntimeError as exc:
+            return f"❌ 读取 MCP 配置失败: {exc}"
 
         if name not in config.get("mcpServers", {}):
             return f"❌ MCP 服务器 `{name}` 不存在"
