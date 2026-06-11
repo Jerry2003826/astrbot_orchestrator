@@ -1,7 +1,7 @@
 """插件数据目录解析。
 
 统一使用官方 StarTools.get_data_dir()，所有持久化产物
-（审计日志、agent_projects 等）都落在 data/plugin_data/astrbot_orchestrator_v5/。
+（审计日志、agent_projects 等）都落在 data/plugin_data/astrbot_plugin_orchestrator/。
 """
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ import tempfile
 
 from astrbot.api import logger
 
-PLUGIN_NAME = "astrbot_orchestrator_v5"
+PLUGIN_NAME = "astrbot_plugin_orchestrator"
 
 
 def get_plugin_data_dir() -> Path:
-    """返回本插件的数据目录（data/plugin_data/astrbot_orchestrator_v5）。"""
+    """返回本插件的数据目录（data/plugin_data/astrbot_plugin_orchestrator）。"""
 
     from astrbot.api.star import StarTools
 

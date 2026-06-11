@@ -22,7 +22,7 @@ ADMIN = filter.PermissionType.ADMIN
 
 
 @register(
-    name="astrbot_orchestrator_v5",
+    name="astrbot_plugin_orchestrator",
     desc="全自主智能体编排器 - 基于官方 tool_loop_agent + FunctionTool + HandoffTool",
     version="4.0.0",
     author="lijiarui",

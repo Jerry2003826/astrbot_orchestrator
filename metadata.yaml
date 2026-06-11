@@ -1,5 +1,5 @@
 # AstrBot 插件元数据（AstrBot >=4.25 从本文件读取）
-name: astrbot_orchestrator_v5
+name: astrbot_plugin_orchestrator
 display_name: 全自主智能体编排器
 desc: |
   全自主智能体编排器 - 通过聊天完成所有操作。
@@ -8,7 +8,7 @@ desc: |
 short_desc: 插件/Skill/MCP/沙盒/调试能力工具化的全自主编排器
 version: 4.0.0
 author: lijiarui
-repo: https://github.com/Jerry2003826/astrbot_orchestrator
+repo: https://github.com/Jerry2003826/astrbot_plugin_orchestrator
 
 # 要求的 AstrBot 版本范围（PEP 440 specifier）
 astrbot_version: ">=4.25,<5"

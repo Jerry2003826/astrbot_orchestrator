@@ -1,6 +1,6 @@
 # 架构说明
 
-`astrbot_orchestrator_v5` 是一个运行在 `AstrBot >= 4.25` 宿主中的智能体编排插件。
+`astrbot_plugin_orchestrator` 是一个运行在 `AstrBot >= 4.25` 宿主中的智能体编排插件。
 
 v4.0 起，插件不再维护自研编排框架（规划循环、任务分析器、元编排器、代理协调器已全部删除），而是直接构建在 AstrBot 官方 Agent 体系上：
 
@@ -13,7 +13,7 @@ v4.0 起，插件不再维护自研编排框架（规划循环、任务分析器
 ```mermaid
 flowchart TB
     User[用户] --> AstrBot[AstrBot Host]
-    AstrBot --> Plugin[astrbot_orchestrator_v5]
+    AstrBot --> Plugin[astrbot_plugin_orchestrator]
 
     Plugin --> LLM[LLM Provider]
     Plugin --> MCP[MCP Servers]

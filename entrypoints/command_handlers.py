@@ -994,7 +994,7 @@ class CommandHandlers:
         log_method("security_audit %s", serialized)
 
     def _get_audit_log_path(self) -> str | None:
-        """解析安全审计日志落盘路径（data/plugin_data/astrbot_orchestrator_v5/）。"""
+        """解析安全审计日志落盘路径（data/plugin_data/astrbot_plugin_orchestrator/）。"""
 
         try:
             data_dir = get_plugin_data_dir()

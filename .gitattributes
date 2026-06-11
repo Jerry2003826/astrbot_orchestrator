@@ -1,0 +1,7 @@
+# 插件市场 zip（git archive）排除开发专用内容，缩小安装包体积
+_astrbot_stub/ export-ignore
+tests/ export-ignore
+docs/ export-ignore
+.github/ export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore

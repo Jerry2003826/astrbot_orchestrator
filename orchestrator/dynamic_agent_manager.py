@@ -14,7 +14,7 @@ from astrbot.api import logger
 from .agent_templates import AgentTemplateLibrary
 
 MANAGED_FLAG = "managed_by"
-MANAGED_VALUE = "astrbot_orchestrator_v5"
+MANAGED_VALUE = "astrbot_plugin_orchestrator"
 
 
 class DynamicAgentManager:

@@ -1,6 +1,6 @@
 # AstrBot Orchestrator V5
 
-`astrbot_orchestrator_v5` 是一个运行在 `AstrBot >= 4.25` 宿主中的聊天驱动智能体编排插件。
+`astrbot_plugin_orchestrator` 是一个运行在 `AstrBot >= 4.25` 宿主中的聊天驱动智能体编排插件。
 
 它不再自研 Agent 框架，而是完全构建在 AstrBot 官方 Agent 体系之上：`/agent` 命令由官方 `tool_loop_agent` 驱动，插件/Skill/MCP 管理、沙盒代码执行、自我调试和 YAML 工作流全部封装为官方 `FunctionTool` 注册给宿主，子代理对接官方 `SubAgentOrchestrator`（HandoffTool）。默认聊天 Agent 和 `/agent` 命令共享同一套工具。
 
@@ -104,7 +104,7 @@ flowchart TB
 ## 开发与验证
 
 ```bash
-cd astrbot_orchestrator_v5
+cd astrbot_plugin_orchestrator
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 

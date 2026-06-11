@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "astrbot-orchestrator-v5"
+name = "astrbot-plugin-orchestrator"
 version = "4.0.0"
 description = "AstrBot agent orchestrator plugin built on the official agent stack (tool_loop_agent + FunctionTool + HandoffTool)."
 readme = "README.md"
