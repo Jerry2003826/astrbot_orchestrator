@@ -58,8 +58,16 @@ class SkillCreatorTool:
         return stripped
 
     def _get_skill_manager(self) -> Any | None:
-        """获取 AstrBot 的 SkillManager"""
+        """获取 AstrBot 的 SkillManager。
+
+        优先复用宿主托管实例，避免与系统运行时状态隔离；
+        宿主未暴露时才退回自行构造。
+        """
         if self._skill_manager is None:
+            host_manager = getattr(self.context, "skill_manager", None)
+            if host_manager is not None:
+                self._skill_manager = host_manager
+                return self._skill_manager
             try:
                 from astrbot.core.skills.skill_manager import SkillManager
 
@@ -156,8 +164,14 @@ class SkillCreatorTool:
             if skill_dir.exists():
                 return f"❌ Skill `{safe_name}` 已存在，请使用其他名称或先删除"
 
-            # 创建目录
-            skill_dir.mkdir(parents=True, exist_ok=True)
+            # 创建目录（防范中间层级被同名普通文件占用的情况）
+            base_dir = Path(skills_path)
+            if base_dir.exists() and not base_dir.is_dir():
+                return f"❌ Skills 根路径被同名文件占用: `{skills_path}`"
+            try:
+                skill_dir.mkdir(parents=True, exist_ok=True)
+            except (NotADirectoryError, FileExistsError) as e:
+                return f"❌ 无法创建 Skill 目录（路径被普通文件占用）: {e}"
 
             # 创建 SKILL.md
             skill_md = skill_dir / "SKILL.md"
@@ -241,7 +255,8 @@ description: {description}
         """
         根据用户描述自动生成 Skill
 
-        使用 LLM 生成 SKILL.md 内容
+        使用 LLM 生成 SKILL.md 内容；失败时与类内其他方法保持一致，
+        返回 ``❌`` 前缀的错误信息而非抛出异常。
         """
         prompt = f"""请根据以下描述生成一个 AstrBot Skill 的 SKILL.md 文件内容。
 
@@ -284,4 +299,4 @@ description: 简短的功能描述
 
         except Exception as e:
             logger.error(f"生成 Skill 内容失败: {e}")
-            raise
+            return f"❌ 生成 Skill 内容失败: {str(e)}"

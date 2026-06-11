@@ -521,14 +521,27 @@ async def test_skill_creator_generate_skill_from_description_covers_all_formats(
 
 
 @pytest.mark.asyncio
-async def test_skill_creator_generate_skill_from_description_reraises_failure() -> None:
-    """LLM 失败时应继续抛出异常，让上层决定如何处理。"""
+async def test_skill_creator_generate_skill_from_description_returns_error_text() -> None:
+    """LLM 失败时应与类内其他方法一致，返回 ❌ 错误字符串。"""
 
     tool = SkillCreatorTool(context=FakeContext(llm_error=RuntimeError("llm down")))
 
-    with pytest.raises(RuntimeError, match="llm down"):
-        await tool.generate_skill_from_description(
-            "Calendar Skill",
-            "做一个日历 Skill",
-            "provider-a",
-        )
+    result = await tool.generate_skill_from_description(
+        "Calendar Skill",
+        "做一个日历 Skill",
+        "provider-a",
+    )
+
+    assert result.startswith("❌")
+    assert "llm down" in result
+
+
+def test_skill_creator_prefers_host_managed_skill_manager() -> None:
+    """宿主暴露 skill_manager 时应复用托管实例而非自行构造。"""
+
+    host_manager = object()
+    context = FakeContext()
+    context.skill_manager = host_manager
+    tool = SkillCreatorTool(context=context)
+
+    assert tool._get_skill_manager() is host_manager
