@@ -210,6 +210,12 @@ class FakeClientSession:
 
         self._get_results = list(get_results or [])
         self.get_calls: list[dict[str, Any]] = []
+        self.closed = False
+
+    async def close(self) -> None:
+        """模拟关闭会话。"""
+
+        self.closed = True
 
     async def __aenter__(self) -> FakeClientSession:
         """进入异步上下文并返回自身。"""
@@ -368,6 +374,9 @@ async def test_plugin_manager_fetch_registry_handles_non_200_and_total_failure(
     assert len(non_200_session.get_calls) == 2
 
     tool.invalidate_cache()
+    # 关闭复用的会话，使下一次请求重建（同时覆盖 aclose 路径）
+    await tool.aclose()
+    assert non_200_session.closed is True
     failing_session = FakeClientSession(
         get_results=[RuntimeError("api down"), RuntimeError("fallback down")]
     )

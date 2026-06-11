@@ -107,6 +107,8 @@ async def test_plugin_manager_empty_fetch_not_cached(
 
     # 模拟网络失败 —— aiohttp.ClientSession 抛异常
     class _FakeSession:
+        closed = False
+
         async def __aenter__(self) -> "_FakeSession":
             return self
 
@@ -151,6 +153,8 @@ async def test_plugin_manager_non_empty_fetch_is_cached(
             return None
 
     class _FakeSession:
+        closed = False
+
         async def __aenter__(self) -> "_FakeSession":
             return self
 

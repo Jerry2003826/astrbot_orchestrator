@@ -34,10 +34,16 @@ class ArtifactService:
         return cast(dict[str, str], extractor.extract_web_project(text))
 
     def collect_output_text(self, result: Mapping[str, Any]) -> str:
-        """合并任务输出与最终回答文本。"""
+        """合并任务输出与最终回答文本（对上游传入的类型做防御）。"""
 
         all_outputs = result.get("_all_task_outputs", [])
-        combined_text = "\n\n".join(all_outputs) if all_outputs else ""
+        if isinstance(all_outputs, str):
+            parts = [all_outputs]
+        elif isinstance(all_outputs, (list, tuple)):
+            parts = [str(item) for item in all_outputs]
+        else:
+            parts = []
+        combined_text = "\n\n".join(parts)
         answer_text = str(result.get("answer", "") or "")
         if answer_text:
             combined_text = combined_text + "\n\n" + answer_text if combined_text else answer_text

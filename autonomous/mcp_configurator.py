@@ -42,6 +42,21 @@ class MCPConfiguratorTool:
 
     def __init__(self, context: Any) -> None:
         self.context = context
+        self._session: aiohttp.ClientSession | None = None
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        """惰性创建并复用 HTTP 会话，利用连接池降低请求开销。"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def aclose(self) -> None:
+        """关闭持有的 HTTP 会话（由运行时容器在停止时调用）。"""
+        try:
+            if self._session is not None and not self._session.closed:
+                await self._session.close()
+        finally:
+            self._session = None
 
     def _get_tool_manager(self) -> Any | None:
         """获取官方 FunctionToolManager（公开 API 单一路径）。"""
@@ -319,40 +334,40 @@ class MCPConfiguratorTool:
         await self._validate_server_url(url)
 
         try:
-            async with aiohttp.ClientSession() as session:
-                if transport == "streamable_http":
-                    # Streamable HTTP 测试
-                    test_payload = {
-                        "jsonrpc": "2.0",
-                        "method": "initialize",
-                        "id": 0,
-                        "params": {
-                            "protocolVersion": "2024-11-05",
-                            "capabilities": {},
-                            "clientInfo": {"name": "test", "version": "1.0"},
-                        },
-                    }
-                    async with session.post(
-                        url,
-                        headers={**headers, "Content-Type": "application/json"},
-                        json=test_payload,
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status == 200:
-                            return f"✅ MCP 服务器 `{name}` 连接正常！\n\nURL: {url}\n状态: HTTP {resp.status}"
-                        else:
-                            return f"❌ 连接失败: HTTP {resp.status}"
-                else:
-                    # SSE 测试
-                    async with session.get(
-                        url,
-                        headers={**headers, "Accept": "text/event-stream"},
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status == 200:
-                            return f"✅ MCP 服务器 `{name}` 连接正常！\n\nURL: {url}\n状态: HTTP {resp.status}"
-                        else:
-                            return f"❌ 连接失败: HTTP {resp.status}"
+            session = self._get_session()
+            if transport == "streamable_http":
+                # Streamable HTTP 测试
+                test_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "initialize",
+                    "id": 0,
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1.0"},
+                    },
+                }
+                async with session.post(
+                    url,
+                    headers={**headers, "Content-Type": "application/json"},
+                    json=test_payload,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        return f"✅ MCP 服务器 `{name}` 连接正常！\n\nURL: {url}\n状态: HTTP {resp.status}"
+                    else:
+                        return f"❌ 连接失败: HTTP {resp.status}"
+            else:
+                # SSE 测试
+                async with session.get(
+                    url,
+                    headers={**headers, "Accept": "text/event-stream"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        return f"✅ MCP 服务器 `{name}` 连接正常！\n\nURL: {url}\n状态: HTTP {resp.status}"
+                    else:
+                        return f"❌ 连接失败: HTTP {resp.status}"
 
         except asyncio.TimeoutError:
             return f"❌ 连接超时: {url}"

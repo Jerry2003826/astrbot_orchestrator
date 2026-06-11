@@ -56,16 +56,16 @@ class RuntimeContainer:
         return container
 
     async def astop(self) -> None:
-        """停止运行时中的可清理资源。"""
+        """停止运行时中的可清理资源（执行器与各能力持有的 HTTP 会话）。"""
 
-        stop_executor = getattr(self.executor, "astop", None)
-        if stop_executor is None:
-            return
-
-        try:
-            await stop_executor()
-        except Exception as exc:
-            logger.debug("停止执行器资源失败，忽略并继续: %s", exc)
+        for component in (self.executor, self.plugin_tool, self.mcp_tool):
+            stop = getattr(component, "astop", None) or getattr(component, "aclose", None)
+            if stop is None:
+                continue
+            try:
+                await stop()
+            except Exception as exc:
+                logger.debug("停止运行时资源失败，忽略并继续: %s", exc)
 
     async def __aenter__(self) -> "RuntimeContainer":
         return self

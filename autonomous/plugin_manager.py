@@ -60,6 +60,21 @@ class PluginManagerTool:
         self.context = context
         self._plugin_cache: list[dict[str, Any]] = []
         self._cache_valid = False
+        self._session: aiohttp.ClientSession | None = None
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        """惰性创建并复用 HTTP 会话，利用连接池降低请求开销。"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def aclose(self) -> None:
+        """关闭持有的 HTTP 会话（由运行时容器在停止时调用）。"""
+        try:
+            if self._session is not None and not self._session.closed:
+                await self._session.close()
+        finally:
+            self._session = None
 
     def _get_plugin_manager(self) -> Any | None:
         """获取 AstrBot 的 PluginManager。
@@ -106,45 +121,41 @@ class PluginManagerTool:
 
         plugins: list[dict[str, Any]] = []
 
-        async with aiohttp.ClientSession() as session:
-            # 尝试官方 API
+        session = self._get_session()
+        # 尝试官方 API
+        try:
+            async with session.get(
+                PLUGIN_REGISTRY_URL, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                plugins = (
+                    data if isinstance(data, list) else data.get("plugins", data.get("stars", []))
+                )
+        except Exception as primary_exc:
+            primary_reason = self._describe_fetch_error(primary_exc)
+            logger.warning(
+                "插件市场主源 %s 获取失败（%s），尝试备用源",
+                PLUGIN_REGISTRY_URL,
+                primary_reason,
+            )
+            # 尝试备用源
+            fallback_url = apply_github_proxy(PLUGIN_REGISTRY_FALLBACK, self._get_github_proxy())
             try:
                 async with session.get(
-                    PLUGIN_REGISTRY_URL, timeout=aiohttp.ClientTimeout(total=10)
+                    fallback_url, timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     resp.raise_for_status()
-                    data = await resp.json()
-                    plugins = (
-                        data
-                        if isinstance(data, list)
-                        else data.get("plugins", data.get("stars", []))
-                    )
-            except Exception as primary_exc:
-                primary_reason = self._describe_fetch_error(primary_exc)
-                logger.warning(
-                    "插件市场主源 %s 获取失败（%s），尝试备用源",
+                    data = await resp.json(content_type=None)
+                    plugins = data if isinstance(data, list) else data.get("plugins", [])
+            except Exception as fallback_exc:
+                logger.error(
+                    "获取插件列表失败。主源 %s: %s；备用源 %s: %s",
                     PLUGIN_REGISTRY_URL,
                     primary_reason,
+                    fallback_url,
+                    self._describe_fetch_error(fallback_exc),
                 )
-                # 尝试备用源
-                fallback_url = apply_github_proxy(
-                    PLUGIN_REGISTRY_FALLBACK, self._get_github_proxy()
-                )
-                try:
-                    async with session.get(
-                        fallback_url, timeout=aiohttp.ClientTimeout(total=10)
-                    ) as resp:
-                        resp.raise_for_status()
-                        data = await resp.json(content_type=None)
-                        plugins = data if isinstance(data, list) else data.get("plugins", [])
-                except Exception as fallback_exc:
-                    logger.error(
-                        "获取插件列表失败。主源 %s: %s；备用源 %s: %s",
-                        PLUGIN_REGISTRY_URL,
-                        primary_reason,
-                        fallback_url,
-                        self._describe_fetch_error(fallback_exc),
-                    )
 
         self._plugin_cache = plugins
         # 仅在成功获取到非空列表时才标记缓存有效，

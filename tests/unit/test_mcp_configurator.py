@@ -164,6 +164,12 @@ class FakeClientSession:
         self._post_results = list(post_results or [])
         self.get_calls: list[dict[str, Any]] = []
         self.post_calls: list[dict[str, Any]] = []
+        self.closed = False
+
+    async def close(self) -> None:
+        """模拟关闭会话。"""
+
+        self.closed = True
 
     async def __aenter__(self) -> FakeClientSession:
         """进入异步上下文并返回自身。"""
