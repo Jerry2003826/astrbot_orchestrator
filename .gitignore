@@ -48,3 +48,6 @@ htmlcov/
 
 # Build / runtime artifacts (注意：不要忽略源代码目录 artifacts/)
 # artifacts/ 已移除此行，因为 artifacts/ 是源代码目录
+.omni/
+.claude/*.omni-tmp
+.claude/settings.json.omni-bak
