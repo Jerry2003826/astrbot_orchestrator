@@ -27,7 +27,7 @@ import typing as t
 
 from astrbot.api import logger
 
-from ..shared import resolve_path_within_base
+from ..shared import resolve_posix_path_within_base
 from .types import ExecChunk, ExecResult, SandboxFile, SandboxStatus
 
 
@@ -201,8 +201,8 @@ class CodeSandbox(ABC):
             SandboxFile 下载后的文件对象
         """
         safe_url = json.dumps(url)
-        target_path = resolve_path_within_base(self.cwd, file_path)
-        safe_file_path = json.dumps(str(target_path))
+        target_path = resolve_posix_path_within_base(self.cwd, file_path)
+        safe_file_path = json.dumps(target_path)
         code = (
             "import httpx\n"
             "async with httpx.AsyncClient() as client:\n"

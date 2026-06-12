@@ -220,7 +220,7 @@ class ArtifactService:
                     if read_result.text and read_result.exit_code == 0:
                         local_path = ensure_within_base(local_project_dir, rel_path)
                         os.makedirs(local_path.parent, exist_ok=True)
-                        with open(local_path, "w", encoding="utf-8") as file_obj:
+                        with open(local_path.as_posix(), "w", encoding="utf-8") as file_obj:
                             file_obj.write(read_result.text)
                         saved_files.append(rel_path)
                         logger.info("✅ 已导出: %s -> %s", remote_path, local_path)

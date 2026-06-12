@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import os
+import posixpath
 import re
 from typing import Sequence
 
@@ -142,7 +142,7 @@ class ExecutionFormatter:
     def format_written_file(self, sandbox_cwd: str, sandbox_file: SandboxFile) -> str:
         """格式化文件写入成功提示。"""
 
-        absolute_path = os.path.join(sandbox_cwd, sandbox_file.path)
+        absolute_path = posixpath.join(sandbox_cwd.rstrip("/"), sandbox_file.path)
         return (
             f"✅ 文件已创建: `{sandbox_file.path}` ({sandbox_file.size_human})\n"
             f"📂 绝对路径: `{absolute_path}`"

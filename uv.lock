@@ -158,8 +158,8 @@ wheels = [
 ]
 
 [[package]]
-name = "astrbot-orchestrator-v5"
-version = "3.0.1"
+name = "astrbot-plugin-orchestrator"
+version = "4.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

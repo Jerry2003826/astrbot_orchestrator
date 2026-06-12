@@ -6,6 +6,7 @@ from .path_safety import (
     ensure_within_base,
     quote_shell_path,
     resolve_path_within_base,
+    resolve_posix_path_within_base,
     sanitize_relative_path,
     slugify_identifier,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "evaluate_condition",
     "get_plugin_data_dir",
     "quote_shell_path",
+    "resolve_posix_path_within_base",
     "resolve_path_within_base",
     "resolve_projects_dir",
     "sanitize_relative_path",

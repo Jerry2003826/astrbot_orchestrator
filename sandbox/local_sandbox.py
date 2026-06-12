@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
+import sys
 import tempfile
 import typing as t
 
@@ -58,6 +60,63 @@ def _resolve_default_cwd() -> str:
 
 # 匹配 matplotlib 等生成的图片标签
 IMAGE_PATTERN = re.compile(r"<image>(.*?)</image>", re.DOTALL)
+
+
+def _process_cwd(path: str) -> str:
+    """Return a host filesystem cwd that subprocess can use."""
+
+    resolved = path
+    if os.name == "nt" and path.startswith("/"):
+        if path == "/tmp" or path.startswith("/tmp/"):
+            suffix = path[5:].replace("/", os.sep)
+            resolved = os.path.join(tempfile.gettempdir(), suffix)
+        elif path == _DEFAULT_CWD_SENTINEL or path.startswith(_DEFAULT_CWD_SENTINEL + "/"):
+            suffix = path[len(_DEFAULT_CWD_SENTINEL) :].lstrip("/").replace("/", os.sep)
+            resolved = os.path.join(tempfile.gettempdir(), "astrbot_local_sandbox", suffix)
+    os.makedirs(resolved, exist_ok=True)
+    return resolved
+
+
+def _bash_executable() -> str:
+    """Prefer Git Bash on Windows because System32 bash is a WSL launcher."""
+
+    if os.name != "nt":
+        return "bash"
+
+    candidates = [
+        os.environ.get("GIT_BASH"),
+        os.path.expanduser("~/scoop/apps/git/current/bin/bash.exe"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = os.path.join(entry, "bash.exe")
+        if os.path.exists(candidate) and "system32" not in candidate.lower():
+            return candidate
+
+    return shutil.which("bash") or "bash"
+
+
+def _command_for_kernel(kernel: t.Literal["ipython", "bash"], code: str) -> list[str]:
+    if kernel == "bash":
+        if os.name == "nt":
+            code = (
+                "pwd() { "
+                "if [ \"$#\" -eq 0 ]; then command pwd -W | sed 's#/#\\\\\\\\#g'; "
+                "else command pwd \"$@\"; fi; "
+                "}\n"
+                + code
+            )
+        return [_bash_executable(), "-c", code]
+    return [sys.executable, "-c", code]
+
+
+def _decode_process_output(data: bytes) -> str:
+    return data.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
 class LocalSandbox(CodeSandbox):
@@ -121,13 +180,9 @@ class LocalSandbox(CodeSandbox):
     ) -> ExecResult:
         """本地执行代码"""
         timeout = timeout or self.timeout
-        work_dir = cwd or self.cwd
+        work_dir = _process_cwd(cwd or self.cwd)
 
-        if kernel == "bash":
-            cmd = ["bash", "-c", code]
-        else:
-            # ipython 模式：写入临时文件执行
-            cmd = ["python3", "-c", code]
+        cmd = _command_for_kernel(kernel, code)
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -138,8 +193,8 @@ class LocalSandbox(CodeSandbox):
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
 
-            stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-            stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            stdout = _decode_process_output(stdout_bytes) if stdout_bytes else ""
+            stderr = _decode_process_output(stderr_bytes) if stderr_bytes else ""
             exit_code = proc.returncode or 0
 
             # 提取图片（如果有 matplotlib 等输出）
@@ -203,12 +258,9 @@ class LocalSandbox(CodeSandbox):
         """
 
         timeout = timeout or self.timeout
-        work_dir = cwd or self.cwd
+        work_dir = _process_cwd(cwd or self.cwd)
 
-        if kernel == "bash":
-            cmd = ["bash", "-c", code]
-        else:
-            cmd = ["python3", "-c", code]
+        cmd = _command_for_kernel(kernel, code)
 
         proc: t.Optional[asyncio.subprocess.Process] = None
         queue: asyncio.Queue[t.Optional[ExecChunk]] = asyncio.Queue()
@@ -229,7 +281,7 @@ class LocalSandbox(CodeSandbox):
                 await queue.put(
                     ExecChunk(
                         type=chunk_type,
-                        content=data.decode("utf-8", errors="replace"),
+                        content=_decode_process_output(data),
                     )
                 )
 
@@ -365,7 +417,7 @@ class LocalSandbox(CodeSandbox):
         files = []
         for entry in os.scandir(target_dir):
             if entry.is_file():
-                rel_path = os.path.relpath(entry.path, self.cwd)
+                rel_path = os.path.relpath(entry.path, self.cwd).replace(os.sep, "/")
                 files.append(
                     SandboxFile(
                         path=rel_path,

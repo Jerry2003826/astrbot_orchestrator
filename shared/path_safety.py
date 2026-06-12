@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import posixpath
 import re
 import shlex
 
@@ -103,6 +104,38 @@ def resolve_path_within_base(base_dir: str | Path, candidate_path: str) -> Path:
         return target_path
 
     return ensure_within_base(base_path, candidate)
+
+
+def resolve_posix_path_within_base(base_dir: str, candidate_path: str) -> str:
+    """Resolve a sandbox path using POSIX semantics, independent of host OS."""
+
+    candidate = candidate_path.strip().replace("\\", "/")
+    candidate = _MULTISLASH_PATTERN.sub("/", candidate)
+
+    if not candidate:
+        raise UnsafePathError("path cannot be empty")
+    if _CONTROL_CHAR_PATTERN.search(candidate):
+        raise UnsafePathError("path contains control characters")
+    if _SHELL_META_PATTERN.search(candidate):
+        raise UnsafePathError("path contains shell metacharacters")
+
+    base = _normalize_posix_absolute_base(base_dir)
+    if candidate.startswith("/"):
+        target = posixpath.normpath(candidate)
+    else:
+        target = posixpath.normpath(posixpath.join(base, sanitize_relative_path(candidate)))
+
+    prefix = base.rstrip("/") + "/"
+    if target != base and not target.startswith(prefix):
+        raise UnsafePathError("path escapes sandbox base")
+    return target
+
+
+def _normalize_posix_absolute_base(base_dir: str) -> str:
+    base = _MULTISLASH_PATTERN.sub("/", str(base_dir).strip().replace("\\", "/"))
+    if not base.startswith("/"):
+        raise UnsafePathError("POSIX sandbox base must be absolute")
+    return posixpath.normpath(base)
 
 
 def slugify_identifier(raw_name: str, default: str = "generated") -> str:

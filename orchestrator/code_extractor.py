@@ -374,7 +374,7 @@ class ProjectExporter:
             return ProjectExporter._BAOTA_DEFAULT_PATH
         import tempfile
 
-        return os.path.join(tempfile.gettempdir(), "astrbot_exports")
+        return tempfile.gettempdir() + "/astrbot_exports"
 
     def __init__(self, base_export_path: Optional[str] = None):
         """初始化导出器。

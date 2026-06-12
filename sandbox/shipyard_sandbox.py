@@ -12,12 +12,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import posixpath
 import shlex
 import typing as t
 
 from astrbot.api import logger
 
-from ..shared import quote_shell_path, resolve_path_within_base
+from ..shared import quote_shell_path, resolve_posix_path_within_base
 from .base import CodeSandbox
 from .types import ExecChunk, ExecResult, SandboxFile
 
@@ -208,11 +209,11 @@ class ShipyardSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """上传文件到 Shipyard 沙盒"""
-        full_path = resolve_path_within_base(self.cwd, remote_path)
+        full_path = resolve_posix_path_within_base(self.cwd, remote_path)
         quoted_path = quote_shell_path(full_path)
 
         # 确保目录存在
-        dir_path = full_path.parent
+        dir_path = posixpath.dirname(full_path)
         await self._shell_exec(f"mkdir -p {quote_shell_path(dir_path)}")
 
         payload = content.encode("utf-8") if isinstance(content, str) else content
@@ -235,7 +236,7 @@ class ShipyardSandbox(CodeSandbox):
         timeout: t.Optional[float] = None,
     ) -> SandboxFile:
         """从 Shipyard 沙盒下载文件"""
-        full_path = resolve_path_within_base(self.cwd, remote_path)
+        full_path = resolve_posix_path_within_base(self.cwd, remote_path)
         quoted_path = quote_shell_path(full_path)
 
         # 检查文件是否存在
@@ -265,7 +266,7 @@ class ShipyardSandbox(CodeSandbox):
         path: str = ".",
     ) -> t.List[SandboxFile]:
         """列出 Shipyard 沙盒中的文件"""
-        target_dir = self.cwd if path == "." else resolve_path_within_base(self.cwd, path)
+        target_dir = self.cwd if path == "." else resolve_posix_path_within_base(self.cwd, path)
         quoted_dir = quote_shell_path(target_dir)
 
         result = await self._shell_exec(
